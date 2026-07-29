@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>食刻 · 拍照记热量</title>
+<style>
+  :root {
+    --bg: #faf7f2;
+    --card: #ffffff;
+    --ink: #2d2a26;
+    --muted: #8a8378;
+    --accent: #e07a3f;
+    --accent-soft: #fbe9dd;
+    --green: #5a9367;
+    --red: #c75146;
+    --radius: 16px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    max-width: 520px;
+    margin: 0 auto;
+    /* env(safe-area-inset-*) 让内容避开手机状态栏和底部手势条 */
+    padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(90px + env(safe-area-inset-bottom, 0px));
+  }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 8px 4px 10px; }
+  header h1 { font-size: 22px; letter-spacing: 1px; }
+  .gear { background: none; border: none; font-size: 18px; cursor: pointer; padding: 2px; }
+
+  .datebar { display: flex; align-items: center; justify-content: center; gap: 4px; padding: 2px 4px 14px; position: relative; }
+  .datebar .date { color: var(--ink); font-size: 15px; min-width: 130px; text-align: center; font-weight: 500; }
+  .datebar button { background: none; border: none; cursor: pointer; }
+  #prevDay, #nextDay { font-size: 22px; color: var(--accent); width: 36px; height: 36px; line-height: 1; }
+  #nextDay:disabled { color: #d8d2c8; cursor: default; }
+  .today-btn { position: absolute; right: 4px; font-size: 13px; color: var(--accent); background: var(--accent-soft) !important; padding: 5px 10px; border-radius: 14px; }
+
+  .summary {
+    background: var(--card); border-radius: var(--radius);
+    padding: 20px; margin-bottom: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  }
+  .summary .total { font-size: 40px; font-weight: 700; }
+  .summary .total small { font-size: 15px; font-weight: 400; color: var(--muted); margin-left: 4px; }
+  .goal-row { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; color: var(--muted); font-size: 14px; }
+  .goal-row button { background: none; border: none; color: var(--accent); font-size: 14px; cursor: pointer; }
+  .bar { height: 10px; background: var(--accent-soft); border-radius: 5px; margin-top: 12px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--accent); border-radius: 5px; width: 0%; transition: width .4s; }
+  .bar > div.over { background: var(--red); }
+  .macros { display: flex; gap: 8px; margin-top: 14px; }
+  .macros div { flex: 1; background: var(--bg); border-radius: 10px; padding: 8px; text-align: center; font-size: 13px; color: var(--muted); }
+  .macros b { display: block; font-size: 16px; color: var(--ink); }
+
+  .capture-btn {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    width: 100%; padding: 16px; border: none; border-radius: var(--radius);
+    background: var(--accent); color: #fff; font-size: 17px; font-weight: 600;
+    cursor: pointer; margin-bottom: 16px;
+  }
+  .capture-btn:active { opacity: .85; }
+  .capture-btn svg { width: 22px; height: 22px; }
+
+  .card {
+    background: var(--card); border-radius: var(--radius);
+    padding: 16px; margin-bottom: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  }
+  .card h2 { font-size: 15px; color: var(--muted); font-weight: 500; margin-bottom: 10px; }
+
+  /* 识别结果弹层 */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+    display: none; align-items: flex-end; justify-content: center; z-index: 10;
+  }
+  .overlay.show { display: flex; }
+  .sheet {
+    background: var(--card); width: 100%; max-width: 520px;
+    border-radius: 20px 20px 0 0; max-height: 85vh; overflow-y: auto;
+    padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+  .sheet img { width: 100%; border-radius: 12px; margin-bottom: 14px; max-height: 220px; object-fit: cover; }
+  .sheet .loading { text-align: center; padding: 30px 0; color: var(--muted); }
+  .spinner {
+    width: 32px; height: 32px; border: 3px solid var(--accent-soft);
+    border-top-color: var(--accent); border-radius: 50%;
+    margin: 0 auto 12px; animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .food-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0ece5; }
+  .food-row:last-of-type { border-bottom: none; }
+  .food-row .info b { font-size: 15px; }
+  .food-row .info span { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .food-row .kcal { font-weight: 700; color: var(--accent); white-space: nowrap; }
+  .result-total { display: flex; justify-content: space-between; padding: 14px 0 4px; font-size: 17px; font-weight: 700; }
+  .confidence { font-size: 13px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+  .sheet-actions { display: flex; gap: 10px; margin-top: 18px; }
+  .sheet-actions button {
+    flex: 1; padding: 14px; border-radius: 12px; border: none;
+    font-size: 16px; font-weight: 600; cursor: pointer;
+  }
+  .btn-cancel { background: var(--bg); color: var(--muted); }
+  .btn-save { background: var(--accent); color: #fff; }
+  .error-msg { color: var(--red); text-align: center; padding: 20px 0; }
+
+  /* 今日记录 */
+  .entry { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid #f0ece5; }
+  .entry:last-child { border-bottom: none; }
+  .entry img { width: 52px; height: 52px; border-radius: 10px; object-fit: cover; flex-shrink: 0; }
+  .entry .detail { flex: 1; min-width: 0; }
+  .entry .detail b { font-size: 14px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .entry .detail span { font-size: 12px; color: var(--muted); }
+  .entry .kcal { font-weight: 700; font-size: 15px; white-space: nowrap; }
+  .entry .del { background: none; border: none; color: #c9c2b6; font-size: 18px; cursor: pointer; padding: 4px; }
+  .empty { text-align: center; color: var(--muted); padding: 24px 0; font-size: 14px; }
+
+  /* 设置面板 */
+  .sheet h3 { font-size: 18px; margin-bottom: 16px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .field select, .field input, .field textarea {
+    width: 100%; padding: 12px; border: 1px solid #e5dfd5; border-radius: 10px;
+    font-size: 15px; background: var(--bg); color: var(--ink); -webkit-appearance: none;
+    font-family: inherit;
+  }
+  .field textarea { min-height: 60px; resize: vertical; line-height: 1.5; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 5px; line-height: 1.5; }
+  .model-label { text-align: center; font-size: 12px; color: var(--muted); margin: -8px 0 14px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>食刻</h1>
+  <button class="gear" id="settingsBtn" aria-label="设置">⚙️</button>
+</header>
+
+<div class="datebar">
+  <button id="prevDay" aria-label="前一天">‹</button>
+  <span class="date" id="dateLabel"></span>
+  <button id="nextDay" aria-label="后一天">›</button>
+  <button class="today-btn" id="todayBtn" hidden>回到今天</button>
+</div>
+
+<div class="summary">
+  <div class="total"><span id="totalKcal">0</span><small>/ <span id="goalKcal">2000</span> 千卡</small></div>
+  <div class="goal-row">
+    <span id="remainLabel">还可摄入 2000 千卡</span>
+    <button id="editGoal">设置目标</button>
+  </div>
+  <div class="bar"><div id="barFill"></div></div>
+  <div class="macros">
+    <div>蛋白质<b id="mProtein">0g</b></div>
+    <div>碳水<b id="mCarbs">0g</b></div>
+    <div>脂肪<b id="mFat">0g</b></div>
+  </div>
+</div>
+
+<button class="capture-btn" id="captureBtn">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+    <circle cx="12" cy="13" r="4"/>
+  </svg>
+  <span id="captureLabel">拍照记录这一餐</span>
+</button>
+<input type="file" id="fileInput" accept="image/*" capture="environment" hidden>
+<div class="model-label" id="modelLabel"></div>
+
+<div class="card">
+  <h2 id="logTitle">今日记录</h2>
+  <div id="entryList"><div class="empty">还没有记录，拍张照开始吧</div></div>
+</div>
+
+<!-- 识别结果弹层 -->
+<div class="overlay" id="overlay">
+  <div class="sheet" id="sheet"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const localDateStr = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const dateKey = (d) => "eat-log-" + localDateStr(d);
+let viewDate = new Date(); // 当前查看/记录的日期
+
+let pendingResult = null;
+let pendingThumb = null;
+let pendingNote = "";
+let pendingDataUrl = null;
+let appConfig = null;
+
+// 是否运行在打包后的手机应用里（Capacitor）。应用模式下没有 Node 后端，
+// 直接从本机调用各服务商 API（CapacitorHttp 原生请求，不受 CORS 限制）。
+const IS_APP = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+
+// ====== 应用模式：服务商元数据与直连调用（与 server.js 保持一致） ======
+const LOCAL_PROVIDERS = [
+  { id: "claude", name: "Claude (Anthropic)", hasEnvKey: false, models: [
+    { id: "claude-opus-4-8", label: "Opus 4.8（最准）" },
+    { id: "claude-sonnet-4-6", label: "Sonnet 4.6（均衡）" },
+    { id: "claude-haiku-4-5", label: "Haiku 4.5（最省）" },
+  ]},
+  { id: "openai", name: "OpenAI", hasEnvKey: false, baseUrl: "https://api.openai.com/v1", models: [
+    { id: "gpt-5.1", label: "GPT-5.1" },
+    { id: "gpt-4o", label: "GPT-4o" },
+    { id: "gpt-4o-mini", label: "GPT-4o mini（最省）" },
+  ]},
+  { id: "qwen", name: "通义千问（阿里云）", hasEnvKey: false, baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", models: [
+    { id: "qwen-vl-max", label: "Qwen-VL-Max（最准）" },
+    { id: "qwen-vl-plus", label: "Qwen-VL-Plus（更省）" },
+  ]},
+  { id: "zhipu", name: "智谱 GLM", hasEnvKey: false, baseUrl: "https://open.bigmodel.cn/api/paas/v4", models: [
+    { id: "glm-4v-plus", label: "GLM-4V-Plus" },
+     { id: "glm-4v", label: "GLM-4V" },
+ ]},
+ { id: "deepseek", name: "DeepSeek", hasEnvKey: false, baseUrl: "https://api.deepseek.com", models: [
+   { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro（最准）" },
+   { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash（更省）" },
+ ]},
+ { id: "custom", name: "自定义（OpenAI 兼容）", hasEnvKey: false, models: [] },
+ ];
+
+const SYSTEM_PROMPT =
+  "你是一位专业营养师。根据食物照片识别其中的食物种类，估算每种食物的份量、热量（千卡）和三大营养素。" +
+  "估算时参考常见餐具尺寸（碗、盘、杯）判断份量。如果照片里没有食物，将 is_food 设为 false 并将 foods 留空。" +
+  "如果用户提供了补充说明（如价格、单价、总量、容器大小、品牌），请优先据此推算份量并在 notes 里说明推算过程；" +
+  "例如『花14元，单价1.42元/两』可推算重量≈14÷1.42≈9.86两≈493克（1两=50克）。" +
+  "宁可给出合理区间的中间值，也不要拒绝估算。所有文字用简体中文。";
+
+const FOOD_SCHEMA = {
+  type: "object",
+  properties: {
+    is_food: { type: "boolean" },
+    foods: { type: "array", items: { type: "object", properties: {
+      name: { type: "string" }, portion: { type: "string" }, calories: { type: "integer" },
+      protein_g: { type: "number" }, carbs_g: { type: "number" }, fat_g: { type: "number" },
+    }, required: ["name","portion","calories","protein_g","carbs_g","fat_g"], additionalProperties: false }},
+    total_calories: { type: "integer" },
+    confidence: { type: "string", enum: ["low","medium","high"] },
+    notes: { type: "string" },
+  },
+  required: ["is_food","foods","total_calories","confidence","notes"],
+  additionalProperties: false,
+};
+
+const JSON_SHAPE_HINT = JSON.stringify({ is_food: true, foods: [{ name: "食物名", portion: "约150克", calories: 200, protein_g: 10, carbs_g: 20, fat_g: 8 }], total_calories: 200, confidence: "medium", notes: "说明" });
+
+function parseJsonLoose(text) {
+  const cleaned = text.replace(/```(?:json)?/g, "").trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start === -1 || end === -1) throw new Error("模型返回的不是有效 JSON");
+  return JSON.parse(cleaned.slice(start, end + 1));
+}
+
+function normalizeResult(r) {
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const foods = Array.isArray(r.foods) ? r.foods.map((f) => ({
+    name: String(f.name || "未知食物"), portion: String(f.portion || ""),
+    calories: Math.round(num(f.calories)), protein_g: num(f.protein_g),
+    carbs_g: num(f.carbs_g), fat_g: num(f.fat_g),
+  })) : [];
+  return {
+    is_food: Boolean(r.is_food) && foods.length > 0, foods,
+    total_calories: Math.round(num(r.total_calories) || foods.reduce((s, f) => s + f.calories, 0)),
+    confidence: ["low","medium","high"].includes(r.confidence) ? r.confidence : "medium",
+    notes: String(r.notes || ""),
+  };
+}
+
+// 应用模式下直接调用服务商 API
+async function directAnalyze(s, base64, note) {
+  const key = (getKeys()[s.provider] || "").trim();
+  if (!key) throw new Error("未配置 API key，请点右上角 ⚙️ 设置");
+  const model = effectiveModel(s);
+  if (!model) throw new Error("请在设置中填写模型名称");
+  const userText = "请识别这张照片中的食物并估算热量。" + (note ? "\n用户补充说明：" + note : "");
+
+  if (s.provider === "claude") {
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model, max_tokens: 2048,
+        thinking: { type: "adaptive" },
+        output_config: { format: { type: "json_schema", schema: FOOD_SCHEMA } },
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+          { type: "text", text: userText },
+        ]}],
+      }),
+    });
+    if (!resp.ok) throw await providerError(resp);
+    const data = await resp.json();
+    const block = (data.content || []).find((b) => b.type === "text");
+    if (!block) throw new Error("模型未返回结果，请重试");
+    return normalizeResult(JSON.parse(block.text));
+  }
+
+  // OpenAI 兼容路径
+  const meta = providerMeta(s.provider);
+  const base = (s.provider === "custom" ? s.customBaseUrl : meta.baseUrl || "").replace(/\/$/, "");
+  if (!base) throw new Error("请在设置中填写接口地址 (Base URL)");
+  const resp = await fetch(`${base}/chat/completions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT + "\n你必须只输出一个 JSON 对象，不要输出任何其他文字、解释或 markdown 代码块。JSON 结构示例：" + JSON_SHAPE_HINT },
+        { role: "user", content: [
+          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}` } },
+          { type: "text", text: userText + "\n只输出 JSON。" },
+        ]},
+      ],
+    }),
+  });
+  if (!resp.ok) throw await providerError(resp);
+  const data = await resp.json();
+  const text = data.choices?.[0]?.message?.content ?? "";
+  return normalizeResult(parseJsonLoose(text));
+}
+
+async function providerError(resp) {
+  if (resp.status === 401 || resp.status === 403) return new Error("API key 无效或无权限");
+  if (resp.status === 404) return new Error("模型不存在或接口地址错误");
+  if (resp.status === 429) return new Error("请求过于频繁，请稍后再试");
+  return new Error(`服务商返回错误 (${resp.status})`);
+}
+
+// ---------- 服务商设置 ----------
+function getSettings() {
+  try { return { provider: "claude", model: "", customBaseUrl: "", customModel: "", ...JSON.parse(localStorage.getItem("eat-settings")) }; }
+  catch { return { provider: "claude", model: "", customBaseUrl: "", customModel: "" }; }
+}
+function saveSettingsObj(s) { localStorage.setItem("eat-settings", JSON.stringify(s)); }
+function getKeys() {
+  try { return JSON.parse(localStorage.getItem("eat-keys")) || {}; }
+  catch { return {}; }
+}
+function saveKeys(k) { localStorage.setItem("eat-keys", JSON.stringify(k)); }
+
+async function ensureConfig() {
+  if (!appConfig) {
+    appConfig = IS_APP
+      ? { providers: LOCAL_PROVIDERS }
+      : await (await fetch("/api/config")).json();
+  }
+  return appConfig;
+}
+function providerMeta(id) {
+  return (appConfig?.providers || []).find(p => p.id === id);
+}
+function effectiveModel(s) {
+  if (s.provider === "custom") return s.customModel;
+  const meta = providerMeta(s.provider);
+  if (s.model && meta?.models.some(m => m.id === s.model)) return s.model;
+  return meta?.models[0]?.id || "";
+}
+function renderModelLabel() {
+  const s = getSettings();
+  const meta = providerMeta(s.provider);
+  const model = effectiveModel(s);
+  $("modelLabel").textContent = meta ? `识别引擎：${meta.name} · ${model || "未设置模型"}` : "";
+}
+
+$("settingsBtn").onclick = showSettings;
+
+async function showSettings() {
+  await ensureConfig();
+  const s = getSettings();
+  const keys = getKeys();
+  const provOptions = appConfig.providers
+    .map(p => `<option value="${p.id}" ${p.id === s.provider ? "selected" : ""}>${p.name}</option>`)
+    .join("");
+
+  showSheet(`<h3>设置</h3>
+    <div class="field"><label>服务商</label><select id="setProvider">${provOptions}</select></div>
+    <div class="field" id="modelField"><label>模型</label><select id="setModel"></select></div>
+    <div class="field" id="customModelField" style="display:none">
+      <label>模型名称</label>
+      <input id="setCustomModel" value="${s.customModel || ""}" placeholder="如 gpt-4o / qwen-vl-max">
+    </div>
+    <div class="field" id="baseUrlField" style="display:none">
+      <label>接口地址（OpenAI 兼容 Base URL）</label>
+      <input id="setBaseUrl" value="${s.customBaseUrl || ""}" placeholder="https://api.example.com/v1">
+    </div>
+    <div class="field">
+      <label>API Key</label>
+      <input id="setKey" type="password" placeholder="">
+      <div class="hint" id="keyHint"></div>
+    </div>
+    <div class="field">
+      <label>每日热量目标（千卡）</label>
+      <input id="setGoal" type="number" value="${getGoal()}" min="1">
+    </div>
+    <div class="sheet-actions">
+      <button class="btn-cancel" onclick="hideSheet()">取消</button>
+      <button class="btn-save" id="saveSettingsBtn">保存</button>
+    </div>`);
+
+  const provSel = $("setProvider");
+  const rebuild = () => {
+    const pid = provSel.value;
+    const meta = providerMeta(pid);
+    const isCustom = pid === "custom";
+    $("modelField").style.display = isCustom ? "none" : "";
+    $("customModelField").style.display = isCustom ? "" : "none";
+    $("baseUrlField").style.display = isCustom ? "" : "none";
+    if (!isCustom) {
+      const selected = (pid === s.provider && s.model) ? s.model : meta.models[0]?.id;
+      $("setModel").innerHTML = meta.models
+        .map(m => `<option value="${m.id}" ${m.id === selected ? "selected" : ""}>${m.label}</option>`)
+        .join("");
+    }
+    $("setKey").value = keys[pid] || "";
+    $("keyHint").textContent = IS_APP
+      ? "key 仅保存在手机本地，直接发送给所选服务商"
+      : meta.hasEnvKey
+        ? "服务器已配置该服务商的 key，此处可留空"
+        : "key 仅保存在本机浏览器，并只发送给你自己的服务器";
+  };
+  provSel.onchange = rebuild;
+  rebuild();
+
+  $("saveSettingsBtn").onclick = () => {
+    const pid = provSel.value;
+    const next = {
+      provider: pid,
+      model: pid === "custom" ? "" : $("setModel").value,
+      customModel: $("setCustomModel").value.trim(),
+      customBaseUrl: $("setBaseUrl").value.trim(),
+    };
+    saveSettingsObj(next);
+    const keys = getKeys();
+    const k = $("setKey").value.trim();
+    if (k) keys[pid] = k; else delete keys[pid];
+    saveKeys(keys);
+    const g = parseInt($("setGoal").value);
+    if (g > 0) localStorage.setItem("eat-goal", g);
+    hideSheet();
+    renderModelLabel();
+    render();
+  };
+}
+
+// ---------- 状态 ----------
+function getLog() {
+  try { return JSON.parse(localStorage.getItem(dateKey(viewDate))) || []; }
+  catch { return []; }
+}
+function saveLog(log) { localStorage.setItem(dateKey(viewDate), JSON.stringify(log)); }
+function getGoal() { return parseInt(localStorage.getItem("eat-goal")) || 2000; }
+
+// ---------- 日期导航 ----------
+function isToday(d) { return localDateStr(d) === localDateStr(new Date()); }
+
+function renderDateBar() {
+  const today = new Date();
+  const isT = isToday(viewDate);
+  const isYesterday = localDateStr(viewDate) ===
+    localDateStr(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1));
+  const base = viewDate.toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "short" });
+  $("dateLabel").textContent = isT ? `今天 · ${base}` : isYesterday ? `昨天 · ${base}` : base;
+  $("nextDay").disabled = isT;            // 不能看未来
+  $("todayBtn").hidden = isT;
+  $("logTitle").textContent = isT ? "今日记录" : "当日记录";
+  $("captureLabel").textContent = isT ? "拍照记录这一餐" : "补记这一天的一餐";
+}
+
+function shiftDay(delta) {
+  const next = new Date(viewDate.getFullYear(), viewDate.getMonth(), viewDate.getDate() + delta);
+  if (next > new Date()) return;          // 禁止跳到未来
+  viewDate = next;
+  renderDateBar();
+  render();
+}
+
+$("prevDay").onclick = () => shiftDay(-1);
+$("nextDay").onclick = () => shiftDay(1);
+$("todayBtn").onclick = () => { viewDate = new Date(); renderDateBar(); render(); };
+
+// ---------- 渲染 ----------
+function render() {
+  const log = getLog();
+  const goal = getGoal();
+  const total = log.reduce((s, e) => s + e.calories, 0);
+  const protein = log.reduce((s, e) => s + e.protein, 0);
+  const carbs = log.reduce((s, e) => s + e.carbs, 0);
+  const fat = log.reduce((s, e) => s + e.fat, 0);
+
+  $("totalKcal").textContent = total;
+  $("goalKcal").textContent = goal;
+  $("mProtein").textContent = protein.toFixed(0) + "g";
+  $("mCarbs").textContent = carbs.toFixed(0) + "g";
+  $("mFat").textContent = fat.toFixed(0) + "g";
+
+  const remain = goal - total;
+  $("remainLabel").textContent = remain >= 0
+    ? `还可摄入 ${remain} 千卡`
+    : `已超出 ${-remain} 千卡`;
+
+  const fill = $("barFill");
+  fill.style.width = Math.min(100, (total / goal) * 100) + "%";
+  fill.classList.toggle("over", total > goal);
+
+  const list = $("entryList");
+  if (log.length === 0) {
+    list.innerHTML = isToday(viewDate)
+      ? '<div class="empty">还没有记录，拍张照开始吧</div>'
+      : '<div class="empty">这一天没有记录</div>';
+    return;
+  }
+  const esc = (t) => String(t).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+  list.innerHTML = log.map((e, i) => `
+    <div class="entry">
+      ${e.thumb ? `<img src="${e.thumb}" alt="">` : ""}
+      <div class="detail">
+        <b>${esc(e.name)}</b>
+        <span>${e.time}${e.note ? " · " + esc(e.note) : ""}</span>
+      </div>
+      <span class="kcal">${e.calories} 千卡</span>
+      <button class="del" data-i="${i}" aria-label="删除">✕</button>
+    </div>
+  `).join("");
+  list.querySelectorAll(".del").forEach(btn => {
+    btn.onclick = () => {
+      const log = getLog();
+      log.splice(parseInt(btn.dataset.i), 1);
+      saveLog(log);
+      render();
+    };
+  });
+}
+
+// ---------- 拍照与压缩 ----------
+$("captureBtn").onclick = () => $("fileInput").click();
+
+$("fileInput").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = "";
+  const { dataUrl, thumb } = await compressImage(file);
+  pendingThumb = thumb;
+  showCapturePreview(dataUrl);
+};
+
+// 识别前的预览：填写可选的补充说明
+function showCapturePreview(dataUrl) {
+  pendingDataUrl = dataUrl;
+  showSheet(`<img src="${dataUrl}" alt="食物照片">
+    <div class="field">
+      <label>补充说明（可选）</label>
+      <textarea id="noteInput">${pendingNote || ""}</textarea>
+      <div class="hint">告诉模型份量、价格或品牌能让估算更准。例如按「价格 ÷ 单价」推算重量。</div>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn-cancel" onclick="hideSheet()">取消</button>
+      <button class="btn-save" id="startAnalyzeBtn">开始识别</button>
+    </div>`);
+  $("startAnalyzeBtn").onclick = () => runAnalyze(dataUrl, $("noteInput").value.trim());
+}
+
+async function runAnalyze(dataUrl, note) {
+  pendingNote = note;
+  showSheet(`<img src="${dataUrl}" alt="食物照片">
+    <div class="loading"><div class="spinner"></div>正在识别食物…</div>`);
+  try {
+    await ensureConfig();
+    const s = getSettings();
+    const base64 = dataUrl.split(",")[1];
+    let data;
+    if (IS_APP) {
+      data = await directAnalyze(s, base64, note);
+    } else {
+      const resp = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          image: base64,
+          mediaType: "image/jpeg",
+          provider: s.provider,
+          model: effectiveModel(s),
+          apiKey: getKeys()[s.provider] || "",
+          baseUrl: s.provider === "custom" ? s.customBaseUrl : undefined,
+          description: note,
+        }),
+      });
+      data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "识别失败");
+    }
+    showResult(dataUrl, data);
+  } catch (err) {
+    showSheet(`<img src="${dataUrl}" alt="食物照片">
+      <div class="error-msg">${err.message}</div>
+      <div class="sheet-actions">
+        <button class="btn-cancel" onclick="hideSheet()">关闭</button>
+        <button class="btn-save" id="retryBtn">返回修改</button>
+      </div>`);
+    $("retryBtn").onclick = () => showCapturePreview(dataUrl);
+  }
+}
+
+// 压缩到长边 1280px，另生成小缩略图用于记录列表
+function compressImage(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const make = (maxEdge, quality) => {
+        const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL("image/jpeg", quality);
+      };
+      resolve({ dataUrl: make(1280, 0.85), thumb: make(120, 0.7) });
+      URL.revokeObjectURL(img.src);
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// ---------- 结果展示 ----------
+const CONFIDENCE_LABEL = { low: "置信度较低", medium: "置信度中等", high: "置信度较高" };
+
+function showResult(dataUrl, data) {
+  if (!data.is_food || data.foods.length === 0) {
+    showSheet(`<img src="${dataUrl}" alt="照片">
+      <div class="error-msg">照片中没有识别到食物</div>
+      <div class="sheet-actions">
+        <button class="btn-cancel" onclick="hideSheet()">关闭</button>
+      </div>`);
+    return;
+  }
+  pendingResult = data;
+  const rows = data.foods.map(f => `
+    <div class="food-row">
+      <div class="info"><b>${f.name}</b><span>${f.portion} · 蛋白 ${f.protein_g}g · 碳水 ${f.carbs_g}g · 脂肪 ${f.fat_g}g</span></div>
+      <span class="kcal">${f.calories} 千卡</span>
+    </div>`).join("");
+
+  const saveLabel = isToday(viewDate) ? "记入今日" : "记入当日";
+  showSheet(`<img src="${dataUrl}" alt="食物照片">
+    ${pendingNote ? `<div class="confidence">你的说明：${pendingNote}</div>` : ""}
+    ${rows}
+    <div class="result-total"><span>合计</span><span>${data.total_calories} 千卡</span></div>
+    <div class="confidence">${CONFIDENCE_LABEL[data.confidence] || ""}${data.notes ? " · " + data.notes : ""}</div>
+    <div class="sheet-actions">
+      <button class="btn-cancel" onclick="hideSheet()">取消</button>
+      <button class="btn-save" onclick="saveEntry()">${saveLabel}</button>
+    </div>`);
+}
+
+function saveEntry() {
+  if (!pendingResult) return;
+  const log = getLog();
+  log.push({
+    name: pendingResult.foods.map(f => f.name).join("、"),
+    calories: pendingResult.total_calories,
+    protein: pendingResult.foods.reduce((s, f) => s + f.protein_g, 0),
+    carbs: pendingResult.foods.reduce((s, f) => s + f.carbs_g, 0),
+    fat: pendingResult.foods.reduce((s, f) => s + f.fat_g, 0),
+    time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
+    note: pendingNote || "",
+    thumb: pendingThumb,
+  });
+  saveLog(log);
+  pendingResult = null;
+  pendingThumb = null;
+  pendingNote = "";
+  hideSheet();
+  render();
+}
+
+function showSheet(html) {
+  $("sheet").innerHTML = html;
+  $("overlay").classList.add("show");
+}
+function hideSheet() {
+  $("overlay").classList.remove("show");
+  pendingResult = null;
+  pendingNote = "";
+}
+$("overlay").onclick = (e) => { if (e.target === $("overlay")) hideSheet(); };
+
+// ---------- 目标设置 ----------
+$("editGoal").onclick = () => {
+  const v = prompt("设置每日热量目标（千卡）", getGoal());
+  const n = parseInt(v);
+  if (n > 0) { localStorage.setItem("eat-goal", n); render(); }
+};
+
+// ---------- 初始化 ----------
+renderDateBar();
+render();
+ensureConfig().then(renderModelLabel).catch(() => {});
+</script>
+</body>
+</html>

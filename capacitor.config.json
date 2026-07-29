@@ -1,0 +1,14 @@
+{
+  "appId": "com.gee.eatapp",
+  "appName": "食刻",
+  "webDir": "public",
+  "backgroundColor": "#faf7f2",
+  "android": {
+    "adjustMarginsForEdgeToEdge": "force"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">食刻</string>
+    <string name="title_activity_main">食刻</string>
+    <string name="package_name">com.gee.eatapp</string>
+    <string name="custom_url_scheme">com.gee.eatapp</string>
+</resources>

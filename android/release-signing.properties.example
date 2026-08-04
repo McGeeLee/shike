@@ -1,0 +1,4 @@
+storeFile=.signing/shike-release.p12
+storePasswordFile=.signing/password
+keyAlias=shike-release
+keyPasswordFile=.signing/password

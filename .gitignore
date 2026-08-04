@@ -8,6 +8,8 @@ android/.gradle/
 android/build/
 android/app/build/
 android/capacitor-cordova-android-plugins/build/
+android/.signing/
+android/release-signing.properties
 .idea/
 captures/
 *.log

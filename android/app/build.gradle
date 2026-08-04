@@ -1,5 +1,11 @@
 apply plugin: 'com.android.application'
 
+def releaseSigningPropertiesFile = rootProject.file('release-signing.properties')
+def releaseSigningProperties = new Properties()
+if (releaseSigningPropertiesFile.exists()) {
+    releaseSigningPropertiesFile.withInputStream { releaseSigningProperties.load(it) }
+}
+
 android {
     namespace = "com.gee.eatapp"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -8,7 +14,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
-        versionName "1.0"
+        versionName "1.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +22,21 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (releaseSigningPropertiesFile.exists()) {
+                storeFile rootProject.file(releaseSigningProperties['storeFile'])
+                storePassword rootProject.file(releaseSigningProperties['storePasswordFile']).text.trim()
+                keyAlias releaseSigningProperties['keyAlias']
+                keyPassword rootProject.file(releaseSigningProperties['keyPasswordFile']).text.trim()
+            }
+        }
+    }
     buildTypes {
         release {
+            if (releaseSigningPropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

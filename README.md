@@ -61,6 +61,8 @@ npm run build:android
 
 首次使用时，点击右上角设置，选择服务商并填写自己的 API Key。点击“自动获取模型”，从接口返回的列表中选择支持图片输入的模型；“测试连接”只读取模型列表，不上传照片，也不会发起一次识别请求。
 
+正式发行时，将 `android/release-signing.properties.example` 复制为 `android/release-signing.properties`，按示例路径准备签名证书和密码文件，再运行 `./gradlew assembleRelease`。实际签名文件已被 Git 忽略；升级同一个 App 必须继续使用同一证书，请单独安全备份。
+
 ## 验证
 
 ```bash

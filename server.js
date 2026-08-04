@@ -6,10 +6,16 @@ import os from "os";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const serverFile = fileURLToPath(import.meta.url);
 
 const app = express();
-app.use(express.json({ limit: "20mb" }));
+app.use(express.json({ limit: "16mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_DESCRIPTION_LENGTH = 500;
+const PROVIDER_TIMEOUT_MS = 120_000;
 
 // ---------- 服务商配置 ----------
 // claude 走 Anthropic 官方 SDK；其余走 OpenAI 兼容的 /chat/completions 接口
@@ -146,6 +152,7 @@ async function analyzeWithOpenAICompat(baseUrl, apiKey, model, image, mediaType,
     "\n只输出 JSON。";
   const resp = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
+    signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
@@ -187,6 +194,7 @@ async function analyzeWithOpenAICompat(baseUrl, apiKey, model, image, mediaType,
 
 // 容错解析：剥掉代码块围栏，截取首尾大括号之间的内容
 function parseJsonLoose(text) {
+  if (typeof text !== "string") throw new Error("模型返回的不是有效文本");
   const cleaned = text.replace(/```(?:json)?/g, "").trim();
   const start = cleaned.indexOf("{");
   const end = cleaned.lastIndexOf("}");
@@ -196,24 +204,83 @@ function parseJsonLoose(text) {
 
 // 统一结果形状，避免个别模型漏字段导致前端出错
 function normalizeResult(r) {
-  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-  const foods = Array.isArray(r.foods)
-    ? r.foods.map((f) => ({
+  const source = r && typeof r === "object" && !Array.isArray(r) ? r : {};
+  const num = (v) => {
+    const parsed = Number(v);
+    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+  };
+  const foods = Array.isArray(source.foods)
+    ? source.foods.map((food) => {
+        const f = food && typeof food === "object" ? food : {};
+        return {
         name: String(f.name || "未知食物"),
         portion: String(f.portion || ""),
         calories: Math.round(num(f.calories)),
         protein_g: num(f.protein_g),
         carbs_g: num(f.carbs_g),
         fat_g: num(f.fat_g),
-      }))
+        };
+      })
     : [];
   return {
-    is_food: Boolean(r.is_food) && foods.length > 0,
+    is_food: Boolean(source.is_food) && foods.length > 0,
     foods,
-    total_calories: Math.round(num(r.total_calories) || foods.reduce((s, f) => s + f.calories, 0)),
-    confidence: ["low", "medium", "high"].includes(r.confidence) ? r.confidence : "medium",
-    notes: String(r.notes || ""),
+    total_calories: Math.round(num(source.total_calories) || foods.reduce((s, f) => s + f.calories, 0)),
+    confidence: ["low", "medium", "high"].includes(source.confidence) ? source.confidence : "medium",
+    notes: String(source.notes || ""),
   };
+}
+
+function validateCustomBaseUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("接口地址不是有效 URL");
+  }
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error("接口地址只支持 HTTP 或 HTTPS");
+  }
+  if (url.username || url.password) {
+    throw new Error("接口地址不能包含用户名或密码");
+  }
+  if (url.search || url.hash) {
+    throw new Error("接口地址不能包含查询参数或锚点");
+  }
+  return url.toString().replace(/\/$/, "");
+}
+
+function validateAnalyzeInput(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error("请求内容格式错误");
+  }
+
+  const image = typeof body.image === "string" ? body.image.trim() : "";
+  if (!image) throw new Error("缺少图片数据");
+  if (image.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(image)) {
+    throw new Error("图片数据格式错误");
+  }
+  if (Buffer.byteLength(image, "base64") > MAX_IMAGE_BYTES) {
+    throw new Error("图片过大，请压缩到 8 MB 以内");
+  }
+
+  const mediaType = typeof body.mediaType === "string" && body.mediaType ? body.mediaType : "image/jpeg";
+  if (!ALLOWED_IMAGE_TYPES.has(mediaType)) throw new Error("不支持的图片格式");
+
+  const description = typeof body.description === "string" ? body.description.trim() : "";
+  if (description.length > MAX_DESCRIPTION_LENGTH) {
+    throw new Error(`补充说明不能超过 ${MAX_DESCRIPTION_LENGTH} 个字符`);
+  }
+
+  const provider = typeof body.provider === "string" ? body.provider.trim() : "claude";
+  const model = typeof body.model === "string" ? body.model.trim() : "";
+  const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+  const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+  if (provider.length > 50 || model.length > 200 || apiKey.length > 4096 || baseUrl.length > 2048) {
+    throw new Error("请求参数过长");
+  }
+
+  return { image, mediaType, provider, model, apiKey, baseUrl, description };
 }
 
 // ---------- 路由 ----------
@@ -231,9 +298,13 @@ app.get("/api/config", (req, res) => {
 
 app.post("/api/analyze", async (req, res) => {
   try {
-    const { image, mediaType = "image/jpeg", provider = "claude", model, apiKey, baseUrl, description } = req.body;
-    if (!image) return res.status(400).json({ error: "缺少图片数据" });
-    const note = (description || "").trim();
+    let input;
+    try {
+      input = validateAnalyzeInput(req.body);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    const { image, mediaType, provider, model, apiKey, baseUrl, description: note } = input;
 
     const meta = PROVIDERS[provider];
     if (!meta) return res.status(400).json({ error: "未知的服务商" });
@@ -248,7 +319,15 @@ app.post("/api/analyze", async (req, res) => {
     if (provider === "claude") {
       result = await analyzeWithClaude(key, usedModel, image, mediaType, note);
     } else {
-      const url = provider === "custom" ? (baseUrl || "").trim() : meta.baseUrl;
+      let url = meta.baseUrl;
+      if (provider === "custom") {
+        if (!baseUrl) return res.status(400).json({ error: "请在设置中填写接口地址 (Base URL)" });
+        try {
+          url = validateCustomBaseUrl(baseUrl);
+        } catch (err) {
+          return res.status(400).json({ error: err.message });
+        }
+      }
       if (!url) return res.status(400).json({ error: "请在设置中填写接口地址 (Base URL)" });
       result = await analyzeWithOpenAICompat(url, key, usedModel, image, mediaType, note);
     }
@@ -263,9 +342,22 @@ app.post("/api/analyze", async (req, res) => {
     if (err instanceof Anthropic.NotFoundError) {
       return res.status(404).json({ error: "模型不存在，请在设置中检查模型名称" });
     }
+    if (err?.name === "TimeoutError" || err?.name === "AbortError") {
+      return res.status(504).json({ error: "模型响应超时，请稍后重试" });
+    }
     console.error(err);
-    res.status(500).json({ error: err.message || "识别失败，请重试" });
+    res.status(500).json({ error: err instanceof SyntaxError ? "模型返回格式有误，请重试" : err.message || "识别失败，请重试" });
   }
+});
+
+app.use((err, req, res, next) => {
+  if (err?.type === "entity.too.large") {
+    return res.status(413).json({ error: "请求过大，请压缩图片后重试" });
+  }
+  if (err instanceof SyntaxError && "body" in err) {
+    return res.status(400).json({ error: "请求 JSON 格式错误" });
+  }
+  return next(err);
 });
 
 // 提供安卓安装包下载（手机连同一 Wi-Fi，浏览器访问 /app.apk）
@@ -277,15 +369,22 @@ app.get("/app.apk", (req, res) => {
   );
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`EAT APP 已启动: http://localhost:${port}`);
-  const ips = Object.values(os.networkInterfaces())
-    .flat()
-    .filter((i) => i && i.family === "IPv4" && !i.internal)
-    .map((i) => i.address);
-  if (ips.length) {
-    console.log(`手机访问（同一 Wi-Fi）: http://${ips[0]}:${port}`);
-    console.log(`APK 下载地址: http://${ips[0]}:${port}/app.apk`);
-  }
-});
+function startServer(port = process.env.PORT || 3000) {
+  return app.listen(port, () => {
+    console.log(`食刻已启动: http://localhost:${port}`);
+    const ips = Object.values(os.networkInterfaces())
+      .flat()
+      .filter((i) => i && i.family === "IPv4" && !i.internal)
+      .map((i) => i.address);
+    if (ips.length) {
+      console.log(`手机访问（同一 Wi-Fi）: http://${ips[0]}:${port}`);
+      console.log(`APK 下载地址: http://${ips[0]}:${port}/app.apk`);
+    }
+  });
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(serverFile)) {
+  startServer();
+}
+
+export { app, normalizeResult, parseJsonLoose, startServer, validateAnalyzeInput, validateCustomBaseUrl };

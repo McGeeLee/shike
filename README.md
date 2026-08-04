@@ -1,44 +1,114 @@
-# 食刻 EAT APP
+<div align="center">
 
-拍照估算每日摄入热量的网页应用。拍一张食物照片，由 Claude 视觉模型识别食物种类、估算份量与热量，并记录到当日摄入总量。
+# 食刻 · Shike
 
-## 功能
+**拍一张，记一餐。用视觉模型把食物照片变成可追踪的热量与营养记录。**
 
-- 📷 拍照 / 上传食物照片，自动识别食物并估算热量与三大营养素（蛋白质、碳水、脂肪）
-- 📊 每日摄入总览：进度条、剩余可摄入量、营养素汇总
-- 🎯 可设置每日热量目标（默认 2000 千卡）
-- 🗑 记录可逐条删除；数据按天保存在浏览器本地（localStorage）
-- ⚙️ 多服务商可选：Claude / OpenAI / 通义千问 / 智谱 GLM / 任意 OpenAI 兼容服务，点右上角齿轮切换服务商与模型，各自填 API key
+![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=nodedotjs&logoColor=white)
+![Express](https://img.shields.io/badge/Express-4.x-111111?logo=express)
+![Capacitor](https://img.shields.io/badge/Capacitor-Android-119EFF?logo=capacitor&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-node:test-78B88A)
+
+<img src="docs/shike-home.png" width="380" alt="食刻首页：每日热量、三大营养素与饮食记录">
+
+</div>
+
+食刻是一个为日常使用而做的食物记录工具。上传或拍摄食物照片，应用会识别食物、估算份量、热量和三大营养素，并把结果留在当天的记录中。
+
+> [!IMPORTANT]
+> 这是辅助记录工具，不是医疗或专业营养建议。识别结果会受到拍摄角度、遮挡和模型能力影响。
+
+## 为什么做它
+
+手动搜索食物、称重、录入数字很容易让记录习惯半途而废。食刻把主要流程压缩成一次拍照，同时保留目标设置、每日汇总和历史补记能力。
+
+## 主要能力
+
+| 能力 | 说明 |
+| --- | --- |
+| 图片识别 | 拍照或上传图片，识别食物与大致份量 |
+| 营养估算 | 返回热量、蛋白质、碳水和脂肪 |
+| 每日追踪 | 展示目标进度、剩余额度与营养素汇总 |
+| 多模型支持 | Claude、OpenAI、通义千问、智谱 GLM、DeepSeek 及自定义 OpenAI 兼容服务 |
+| 本地优先 | 饮食记录保存在浏览器 `localStorage`，不建立远端用户数据库 |
+| Web + Android | Express Web 应用与 Capacitor Android 外壳共用界面 |
+
+## 工作流程
+
+```text
+拍照 / 上传
+    ↓
+浏览器压缩图片（长边 1280px）
+    ↓
+POST /api/analyze 或 Android 原生直连
+    ↓
+按设置选择视觉模型
+    ↓
+校验并归一化结构化结果
+    ↓
+写入当天的本地记录
+```
+
+Claude 路径使用 JSON Schema 结构化输出；其他 OpenAI 兼容模型通过提示词约束、容错解析与结果归一化，最终向前端返回一致的数据结构。
 
 ## 快速开始
 
-1. 安装依赖：
+需要 Node.js 22 或更新版本。
 
-   ```sh
-   npm install
-   ```
+```bash
+git clone https://github.com/McGeeLee/shike.git
+cd shike
+npm ci
+cp .env.example .env
+npm start
+```
 
-2. 配置 API key（二选一）：
+打开 <http://localhost:3000>。API Key 有两种配置方式：
 
-   - **方式 A（推荐）**：启动后在网页右上角"⚙️ 设置"里选择服务商并填入 key（key 保存在本机浏览器，只发送到你自己的服务器）
-   - **方式 B**：`cp .env.example .env`，在 `.env` 中填入对应服务商的 key 作为服务端默认值
+1. 在页面右上角的设置中选择服务商并填写 Key；
+2. 在服务端 `.env` 中提供默认 Key。
 
-3. 启动：
+页面设置中的 Key 会优先于服务端默认值。不要把真实密钥提交到 Git。
 
-   ```sh
-   npm start
-   ```
+## Android
 
-4. 浏览器打开 <http://localhost:3000>。手机访问：确保手机和电脑在同一 Wi-Fi，访问 `http://<电脑的局域网IP>:3000`。
+```bash
+npx cap sync android
+```
 
-## 工作原理
+随后用 Android Studio 打开 `android/`，选择设备并运行。Android 应用没有内置 Node 服务，会从设备直接请求所选模型服务商；Key 仅保存在该设备的 WebView 本地存储中。
 
-- 前端把照片压缩到长边 1280px 后发给后端（节省流量与 API 费用）
-- 后端 `POST /api/analyze` 按设置分发请求：
-  - **Claude**：走 Anthropic 官方 SDK，使用结构化输出（JSON Schema）保证返回可解析
-  - **其他服务商**（OpenAI / 通义 / 智谱 / 自定义）：统一走 OpenAI 兼容的 `/chat/completions` 接口，用提示词约束 JSON 输出并做容错解析
-- 服务端会把所有结果归一化成统一格式，前端无需关心服务商差异
+## 项目结构
 
-## 费用说明
+```text
+shike/
+├── public/index.html       # Web 界面、本地记录与 Android 直连逻辑
+├── server.js               # Express API、输入校验与多模型适配
+├── test/server.test.js     # 解析、校验与 HTTP API 测试
+├── android/                # Capacitor Android 工程
+├── capacitor.config.json   # 移动端配置
+├── AGENT_SPEC.md           # 模型输入输出与职责边界
+└── .env.example            # 环境变量示例
+```
 
-每次识别一张照片约消耗 1500~3000 input tokens + 几百 output tokens。以 Claude Opus 4.8 定价（$5/$25 每百万 tokens）计，每张照片约 1~2 美分；选 Haiku 或国内模型会更便宜。
+## 验证
+
+```bash
+npm run check
+```
+
+检查包括 JavaScript 语法、模型结果归一化、Base URL 与图片请求校验、配置接口和错误响应。GitHub Actions 会在推送和 Pull Request 上运行同一组检查。
+
+## 安全与隐私
+
+- 饮食记录按日期保存在当前浏览器中；清除站点数据会同时清除记录。
+- 食物照片只会发送到你选择的模型服务商进行分析。
+- 页面会转义用户备注与模型返回文本，避免内容被当作 HTML 执行。
+- 服务端限制图片格式、大小、备注长度和自定义 Base URL，并为上游请求设置超时。
+- API Key 不应写进前端源码、截图、日志或 Git 提交。
+
+## 后续方向
+
+- 用可维护的营养数据表替代部分模型数值估算；
+- 增加固定图片回归集，比较不同模型的稳定性；
+- 提供可选的数据导出、备份与记录编辑能力。

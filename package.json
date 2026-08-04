@@ -1,29 +1,27 @@
 {
-  "name": "eat-app",
+  "name": "shike",
   "version": "1.0.0",
-  "description": "拍照估算每日摄入热量的网页应用",
+  "description": "使用视觉模型估算食物热量的 Android 应用",
+  "private": true,
   "type": "module",
-  "main": "server.js",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "start": "node server.js",
-    "check": "node --check server.js && node --test",
-    "test": "node --test"
+    "check": "node --check public/analyze.js && node --check public/app.js && node --test",
+    "test": "node --test",
+    "sync:android": "cap sync android",
+    "build:android": "npm run sync:android && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
     "@capacitor/android": "^8.4.0",
-    "@capacitor/cli": "^8.4.0",
-    "@capacitor/core": "^8.4.0",
-    "dotenv": "^16.4.5",
-    "express": "^4.21.0"
+    "@capacitor/core": "^8.4.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.0"
   },
   "overrides": {
-    "body-parser": "1.20.6",
     "brace-expansion": "5.0.9",
-    "form-data": "4.0.6",
     "tar": "7.5.22"
   }
 }

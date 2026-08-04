@@ -5,6 +5,7 @@
   --muted: #8a8378;
   --accent: #e07a3f;
   --accent-soft: #fbe9dd;
+  --green: #4f8a61;
   --red: #c75146;
   --radius: 16px;
 }
@@ -123,8 +124,16 @@ header h1 { font-size: 22px; letter-spacing: 1px; }
 .field { margin-bottom: 14px; }
 .field label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 13px; }
 .field select, .field input, .field textarea { width: 100%; padding: 12px; border: 1px solid #e5dfd5; border-radius: 10px; color: var(--ink); background: var(--bg); -webkit-appearance: none; }
+.field select:disabled { color: var(--muted); opacity: .7; }
 .field textarea { min-height: 60px; resize: vertical; line-height: 1.5; }
 .hint { margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.model-tools { display: flex; gap: 10px; margin: 2px 0 8px; }
+.model-tool { flex: 1; padding: 11px 8px; border: 1px solid #e5dfd5; border-radius: 10px; color: var(--accent); background: var(--card); cursor: pointer; font-size: 14px; font-weight: 600; }
+.model-tool.primary { border-color: var(--accent); color: #fff; background: var(--accent); }
+.model-tool:disabled { cursor: wait; opacity: .55; }
+.connection-status { min-height: 34px; margin-bottom: 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.connection-status.success { color: var(--green); }
+.connection-status.error { color: var(--red); }
 .settings-error { min-height: 18px; margin-top: 8px; color: var(--red); font-size: 12px; }
 .is-hidden { display: none; }
 

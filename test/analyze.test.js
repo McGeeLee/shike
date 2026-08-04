@@ -6,6 +6,7 @@ import {
   PROVIDERS,
   analyzeFood,
   effectiveModel,
+  listAvailableModels,
   normalizeBaseUrl,
   normalizeResult,
   parseJsonLoose,
@@ -27,6 +28,10 @@ describe("Android app bundle", () => {
     const analyzer = readFileSync(new URL("../public/analyze.js", import.meta.url), "utf8");
     assert.match(html, /type="module" src="\.\/app\.js"/);
     assert.doesNotMatch(`${html}${app}${analyzer}`, /\/api\/analyze|\/api\/config|IS_APP|LOCAL_PROVIDERS/);
+    assert.match(app, /自动获取模型/);
+    assert.match(app, /测试连接/);
+    assert.match(app, /<select id="setCustomModel">/);
+    assert.match(app, /listAvailableModels/);
   });
 
   it("keeps only image-capable providers and a custom endpoint", () => {
@@ -63,9 +68,71 @@ describe("provider configuration", () => {
     assert.throws(() => normalizeBaseUrl("https://api.example.com/v1?token=x"), /查询参数/);
   });
 
-  it("falls back to the provider default model", () => {
-    assert.equal(effectiveModel({ provider: "openai", model: "missing" }), "gpt-5.1");
+  it("keeps a discovered model and otherwise uses the provider default", () => {
+    assert.equal(effectiveModel({ provider: "openai", model: "" }), "gpt-5.1");
+    assert.equal(effectiveModel({ provider: "openai", model: "gpt-5.2-vision" }), "gpt-5.2-vision");
     assert.equal(effectiveModel({ provider: "custom", customModel: " vision-model " }), "vision-model");
+  });
+});
+
+describe("model discovery", () => {
+  it("reads and normalizes an OpenAI-compatible model list", async () => {
+    let request;
+    const models = await listAvailableModels({
+      settings: { provider: "custom", customBaseUrl: "https://work.example/v1" },
+      apiKey: "test-key",
+    }, {
+      fetchImpl: async (url, options) => {
+        request = { url, options };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: [{ id: "gpt-5.1" }, { id: "gpt-4o" }, { id: "gpt-5.1" }] }),
+        };
+      },
+    });
+
+    assert.equal(request.url, "https://work.example/v1/models");
+    assert.equal(request.options.method, "GET");
+    assert.equal(request.options.headers.Authorization, "Bearer test-key");
+    assert.deepEqual(models, ["gpt-4o", "gpt-5.1"]);
+  });
+
+  it("uses Anthropic model discovery headers", async () => {
+    let request;
+    const models = await listAvailableModels({
+      settings: { provider: "claude" },
+      apiKey: "claude-key",
+    }, {
+      fetchImpl: async (url, options) => {
+        request = { url, options };
+        return { ok: true, status: 200, json: async () => ({ data: [{ id: "claude-sonnet-4-6" }] }) };
+      },
+    });
+
+    assert.equal(request.url, "https://api.anthropic.com/v1/models");
+    assert.equal(request.options.headers["x-api-key"], "claude-key");
+    assert.deepEqual(models, ["claude-sonnet-4-6"]);
+  });
+
+  it("surfaces a safe gateway error and validates settings", async () => {
+    await assert.rejects(
+      listAvailableModels({ settings: { provider: "custom", customBaseUrl: "https://work.example/v1" }, apiKey: "" }),
+      /API Key/,
+    );
+    await assert.rejects(
+      listAvailableModels({
+        settings: { provider: "custom", customBaseUrl: "https://work.example/v1" },
+        apiKey: "key",
+      }, {
+        fetchImpl: async () => ({
+          ok: false,
+          status: 404,
+          json: async () => ({ error: { message: "unknown endpoint" } }),
+        }),
+      }),
+      /unknown endpoint/,
+    );
   });
 });
 

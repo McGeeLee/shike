@@ -157,10 +157,8 @@ export function effectiveModel(settings) {
   if (settings?.provider === "custom") return String(settings.customModel || "").trim();
   const provider = providerMeta(settings?.provider);
   if (!provider) return "";
-  const requested = String(settings.model || "");
-  return provider.models.some((model) => model.id === requested)
-    ? requested
-    : provider.models[0]?.id || "";
+  const requested = String(settings.model || "").trim().slice(0, 200);
+  return requested || provider.models[0]?.id || "";
 }
 
 function validateImage(base64) {
@@ -182,11 +180,24 @@ function extractMessageText(content) {
 }
 
 async function providerError(response) {
-  if (response.status === 401 || response.status === 403) return new Error("API Key 无效或没有模型权限");
-  if (response.status === 404) return new Error("模型不存在或接口地址错误");
-  if (response.status === 429) return new Error("请求过于频繁，请稍后再试");
-  if (response.status >= 500) return new Error("模型服务暂时不可用，请稍后再试");
-  return new Error(`模型服务返回错误（${response.status}）`);
+  let detail = "";
+  try {
+    const payload = await response.json();
+    detail = String(payload?.error?.message || payload?.message || payload?.error || "")
+      .replace(/[\u0000-\u001f\u007f]/g, " ")
+      .trim()
+      .slice(0, 240);
+  } catch {
+    // Some gateways return HTML or an empty body for errors.
+  }
+
+  let message;
+  if (response.status === 401 || response.status === 403) message = "API Key 无效或没有模型权限";
+  else if (response.status === 404) message = "模型不存在或接口地址错误";
+  else if (response.status === 429) message = "请求过于频繁，请稍后再试";
+  else if (response.status >= 500) message = "模型服务暂时不可用，请稍后再试";
+  else message = `模型服务返回错误（${response.status}）`;
+  return new Error(detail ? `${message}：${detail}` : message);
 }
 
 async function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
@@ -209,6 +220,59 @@ async function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function normalizeModelIds(payload) {
+  const source = Array.isArray(payload?.data)
+    ? payload.data
+    : Array.isArray(payload?.models)
+      ? payload.models
+      : [];
+  const ids = source.map((item) => {
+    const value = typeof item === "string" ? item : item?.id || item?.name;
+    return String(value || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 200);
+  }).filter(Boolean);
+  return [...new Set(ids)].sort((left, right) => left.localeCompare(right, "en", { numeric: true })).slice(0, 500);
+}
+
+export async function listAvailableModels(input, options = {}) {
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const timeoutMs = options.timeoutMs || 20_000;
+  if (typeof fetchImpl !== "function") throw new Error("当前环境不支持网络请求");
+
+  const settings = input?.settings || {};
+  const provider = providerMeta(settings.provider);
+  if (!provider) throw new Error("请选择有效的模型服务商");
+  const apiKey = String(input?.apiKey || "").trim();
+  if (!apiKey) throw new Error("请先填写 API Key");
+
+  const isClaude = provider.id === "claude";
+  const baseUrl = isClaude
+    ? "https://api.anthropic.com/v1"
+    : normalizeBaseUrl(provider.id === "custom" ? settings.customBaseUrl : provider.baseUrl);
+  const headers = isClaude
+    ? {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    }
+    : { Authorization: `Bearer ${apiKey}` };
+
+  const response = await fetchWithTimeout(fetchImpl, `${baseUrl}/models`, {
+    method: "GET",
+    headers,
+  }, timeoutMs);
+  if (!response.ok) throw await providerError(response);
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error("模型列表返回了无效数据");
+  }
+  const models = normalizeModelIds(payload);
+  if (!models.length) throw new Error("连接成功，但该 API Key 没有返回可用模型");
+  return models;
 }
 
 export async function analyzeFood(input, options = {}) {

@@ -2,6 +2,7 @@ import {
   PROVIDERS,
   analyzeFood,
   effectiveModel,
+  listAvailableModels,
   normalizeBaseUrl,
   normalizeResult,
   providerMeta,
@@ -171,6 +172,10 @@ function hideSheet() {
 function showSettings() {
   const settings = getSettings();
   const keys = getKeys();
+  const discoveredModels = new Map();
+  const selectedModels = new Map([[settings.provider, effectiveModel(settings)]]);
+  let activeProviderId = settings.provider;
+  let discoveryRequest = 0;
   const providerOptions = PROVIDERS.map((provider) =>
     `<option value="${escapeHtml(provider.id)}" ${provider.id === settings.provider ? "selected" : ""}>${escapeHtml(provider.name)}</option>`
   ).join("");
@@ -179,8 +184,9 @@ function showSettings() {
     <div class="field"><label for="setProvider">服务商</label><select id="setProvider">${providerOptions}</select></div>
     <div class="field" id="modelField"><label for="setModel">模型</label><select id="setModel"></select></div>
     <div class="field is-hidden" id="customModelField">
-      <label for="setCustomModel">模型名称</label>
-      <input id="setCustomModel" value="${escapeHtml(settings.customModel)}" maxlength="200" placeholder="如 gpt-4o">
+      <label for="setCustomModel">可用模型</label>
+      <select id="setCustomModel"></select>
+      <div class="hint">模型直接从接口的 /v1/models 读取，不需要手填或猜测。</div>
     </div>
     <div class="field is-hidden" id="baseUrlField">
       <label for="setBaseUrl">接口地址（OpenAI 兼容 Base URL）</label>
@@ -191,6 +197,11 @@ function showSettings() {
       <input id="setKey" type="password" autocomplete="off">
       <div class="hint">API Key 仅保存在此 App 的本地存储中，识别时直接发送给所选服务商。</div>
     </div>
+    <div class="model-tools">
+      <button type="button" class="model-tool" id="fetchModelsBtn">自动获取模型</button>
+      <button type="button" class="model-tool primary" id="testConnectionBtn">测试连接</button>
+    </div>
+    <div class="connection-status" id="connectionStatus" role="status" aria-live="polite"></div>
     <div class="field">
       <label for="setGoal">每日热量目标（千卡）</label>
       <input id="setGoal" type="number" value="${getGoal()}" min="1" max="100000" inputmode="numeric">
@@ -202,6 +213,39 @@ function showSettings() {
     </div>`);
 
   const providerSelect = $("setProvider");
+  const modelSelectFor = (providerId) => providerId === "custom" ? $("setCustomModel") : $("setModel");
+  const rememberSelection = () => {
+    const select = modelSelectFor(activeProviderId);
+    if (select?.value) selectedModels.set(activeProviderId, select.value);
+  };
+  const setConnectionStatus = (message = "", kind = "") => {
+    const status = $("connectionStatus");
+    status.textContent = message;
+    status.className = `connection-status${kind ? ` ${kind}` : ""}`;
+  };
+  const renderModelOptions = (provider) => {
+    const select = modelSelectFor(provider.id);
+    const discovered = discoveredModels.get(provider.id);
+    const savedModel = provider.id === settings.provider ? effectiveModel(settings) : "";
+    const preferred = selectedModels.get(provider.id) || savedModel;
+    const staticLabels = new Map(provider.models.map((model) => [model.id, model.label]));
+    const candidates = discovered || (provider.id === "custom"
+      ? (savedModel ? [savedModel] : [])
+      : provider.models.map((model) => model.id));
+
+    if (!candidates.length) {
+      select.innerHTML = '<option value="">请先自动获取模型</option>';
+      select.disabled = true;
+      return;
+    }
+
+    select.disabled = false;
+    select.innerHTML = candidates.map((modelId) => {
+      const label = staticLabels.get(modelId) || modelId;
+      return `<option value="${escapeHtml(modelId)}" ${modelId === preferred ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    }).join("");
+    selectedModels.set(provider.id, select.value);
+  };
   const rebuild = () => {
     const provider = providerMeta(providerSelect.value);
     if (!provider) return;
@@ -209,17 +253,58 @@ function showSettings() {
     $("modelField").classList.toggle("is-hidden", custom);
     $("customModelField").classList.toggle("is-hidden", !custom);
     $("baseUrlField").classList.toggle("is-hidden", !custom);
-    if (!custom) {
-      const selected = provider.id === settings.provider ? effectiveModel(settings) : provider.models[0]?.id;
-      $("setModel").innerHTML = provider.models.map((model) =>
-        `<option value="${escapeHtml(model.id)}" ${model.id === selected ? "selected" : ""}>${escapeHtml(model.label)}</option>`
-      ).join("");
-    }
+    renderModelOptions(provider);
     $("setKey").value = keys[provider.id] || "";
     $("settingsError").textContent = "";
+    setConnectionStatus();
   };
-  providerSelect.addEventListener("change", rebuild);
+  providerSelect.addEventListener("change", () => {
+    rememberSelection();
+    activeProviderId = providerSelect.value;
+    discoveryRequest += 1;
+    rebuild();
+  });
   rebuild();
+
+  const discoverModels = async (connectionTest = false) => {
+    const providerId = providerSelect.value;
+    const provider = providerMeta(providerId);
+    if (!provider) return;
+    const requestId = ++discoveryRequest;
+    const fetchButton = $("fetchModelsBtn");
+    const testButton = $("testConnectionBtn");
+    fetchButton.disabled = true;
+    testButton.disabled = true;
+    setConnectionStatus(connectionTest ? "正在测试连接…" : "正在读取可用模型…", "loading");
+
+    try {
+      const models = await listAvailableModels({
+        settings: {
+          provider: providerId,
+          customBaseUrl: $("setBaseUrl").value.trim(),
+        },
+        apiKey: $("setKey").value.trim(),
+      });
+      if (requestId !== discoveryRequest || providerSelect.value !== providerId) return;
+      rememberSelection();
+      discoveredModels.set(providerId, models);
+      renderModelOptions(provider);
+      setConnectionStatus(
+        `${connectionTest ? "连接成功" : "获取成功"}，发现 ${models.length} 个模型。请选择支持图片输入的模型。`,
+        "success",
+      );
+    } catch (error) {
+      if (requestId !== discoveryRequest || providerSelect.value !== providerId) return;
+      setConnectionStatus(error.message || "无法获取模型，请检查接口设置", "error");
+    } finally {
+      if (requestId === discoveryRequest && providerSelect.value === providerId) {
+        fetchButton.disabled = false;
+        testButton.disabled = false;
+      }
+    }
+  };
+  $("fetchModelsBtn").addEventListener("click", () => discoverModels(false));
+  $("testConnectionBtn").addEventListener("click", () => discoverModels(true));
 
   $("saveSettingsBtn").addEventListener("click", () => {
     try {
@@ -227,7 +312,7 @@ function showSettings() {
       const customModel = $("setCustomModel").value.trim();
       const customBaseUrl = $("setBaseUrl").value.trim();
       if (providerId === "custom") {
-        if (!customModel) throw new Error("请填写自定义模型名称");
+        if (!customModel) throw new Error("请先自动获取并选择一个可用模型");
         normalizeBaseUrl(customBaseUrl);
       }
       const goal = Number.parseInt($("setGoal").value, 10);

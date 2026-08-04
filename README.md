@@ -24,6 +24,7 @@
 - 按日期查看、补记和删除饮食记录；
 - 设置每日热量目标并查看进度；
 - 支持 Claude、OpenAI、通义千问、智谱 GLM 和自定义 OpenAI 兼容视觉模型；
+- 从 `/v1/models` 自动读取当前 API Key 可用的模型，并可在设置页测试连接；
 - 记录与 API Key 均保存在 App 本地，不需要账号或自建服务器。
 
 ## 架构
@@ -58,7 +59,7 @@ npm run sync:android
 npm run build:android
 ```
 
-首次使用时，点击右上角设置，选择服务商并填写自己的 API Key。
+首次使用时，点击右上角设置，选择服务商并填写自己的 API Key。点击“自动获取模型”，从接口返回的列表中选择支持图片输入的模型；“测试连接”只读取模型列表，不上传照片，也不会发起一次识别请求。
 
 ## 验证
 
@@ -66,7 +67,7 @@ npm run build:android
 npm run check
 ```
 
-检查包含 JavaScript 语法、模型响应容错、HTTPS 地址校验、服务商请求结构，以及纯 App 架构回归测试。GitHub Actions 会在 Pull Request 上执行同一组检查。
+检查包含 JavaScript 语法、模型发现、模型响应容错、HTTPS 地址校验、服务商请求结构，以及纯 App 架构回归测试。GitHub Actions 会在 Pull Request 上执行同一组检查。
 
 ## 隐私与安全
 

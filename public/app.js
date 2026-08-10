@@ -20,6 +20,11 @@ const state = {
   pendingThumb: null,
   pendingNote: "",
   lastFocusedElement: null,
+  analysisRequest: 0,
+  imageRequest: 0,
+  sheetHistoryActive: false,
+  deletedEntry: null,
+  undoTimer: null,
 };
 
 function escapeHtml(value) {
@@ -93,6 +98,7 @@ function renderDateBar() {
   const yesterday = localDateString(state.viewDate) === localDateString(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1));
   const label = state.viewDate.toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "short" });
   $("dateLabel").textContent = todaySelected ? `今天 · ${label}` : yesterday ? `昨天 · ${label}` : label;
+  $("dateLabel").dateTime = localDateString(state.viewDate);
   $("nextDay").disabled = todaySelected;
   $("todayBtn").hidden = todaySelected;
   $("logTitle").textContent = todaySelected ? "今日记录" : "当日记录";
@@ -125,22 +131,25 @@ function render() {
   $("remainLabel").textContent = remaining >= 0 ? `还可摄入 ${remaining} 千卡` : `已超出 ${-remaining} 千卡`;
   $("barFill").style.width = `${Math.min(100, total / goal * 100)}%`;
   $("barFill").classList.toggle("over", total > goal);
+  $("calorieProgress").setAttribute("aria-valuemax", String(goal));
+  $("calorieProgress").setAttribute("aria-valuenow", String(total));
+  $("calorieProgress").setAttribute("aria-valuetext", `${total} / ${goal} 千卡`);
 
   const list = $("entryList");
   if (!log.length) {
-    list.innerHTML = `<div class="empty">${isToday(state.viewDate) ? "还没有记录，拍张照开始吧" : "这一天没有记录"}</div>`;
+    list.innerHTML = `<div class="empty" role="listitem">${isToday(state.viewDate) ? "还没有记录，拍张照开始吧" : "这一天没有记录"}</div>`;
     return;
   }
   list.innerHTML = log.map((entry, index) => {
     const thumbnail = safeImageDataUrl(entry.thumb);
-    return `<div class="entry">
-      ${thumbnail ? `<img src="${thumbnail}" alt="">` : ""}
+    return `<div class="entry" role="listitem">
+      ${thumbnail ? `<img src="${thumbnail}" alt="${escapeHtml(entry.name)}的缩略图" loading="lazy" decoding="async">` : ""}
       <div class="detail">
         <b>${escapeHtml(entry.name)}</b>
         <span>${escapeHtml(entry.time)}${entry.note ? ` · ${escapeHtml(entry.note)}` : ""}</span>
       </div>
       <span class="kcal">${Math.round(safeNumber(entry.calories))} 千卡</span>
-      <button class="del" data-index="${index}" aria-label="删除这条记录">✕</button>
+      <button class="del" type="button" data-index="${index}" aria-label="删除${escapeHtml(entry.name)}">✕</button>
     </div>`;
   }).join("");
 }
@@ -151,22 +160,66 @@ function resetPending() {
   state.pendingNote = "";
 }
 
+function setModalBackgroundInert(inert) {
+  document.querySelectorAll("body > header, body > .datebar, body > main").forEach((element) => {
+    element.inert = inert;
+  });
+}
+
 function showSheet(html) {
   const overlay = $("overlay");
-  if (!overlay.classList.contains("show")) state.lastFocusedElement = document.activeElement;
+  const wasOpen = overlay.classList.contains("show");
+  if (!wasOpen) {
+    state.lastFocusedElement = document.activeElement;
+    try {
+      history.pushState({ shikeSheet: true }, "");
+      state.sheetHistoryActive = true;
+    } catch {
+      state.sheetHistoryActive = false;
+    }
+    document.body.classList.add("modal-open");
+    setModalBackgroundInert(true);
+  }
   $("sheet").innerHTML = html;
   overlay.classList.add("show");
   overlay.setAttribute("aria-hidden", "false");
-  $("sheet").focus();
+  requestAnimationFrame(() => $("sheet").focus());
 }
 
-function hideSheet() {
+function hideSheet({ fromHistory = false } = {}) {
   const overlay = $("overlay");
+  const shouldPopHistory = state.sheetHistoryActive && !fromHistory;
+  state.sheetHistoryActive = false;
+  state.analysisRequest += 1;
+  state.imageRequest += 1;
   overlay.classList.remove("show");
   overlay.setAttribute("aria-hidden", "true");
+  $("sheet").innerHTML = "";
+  document.body.classList.remove("modal-open");
+  setModalBackgroundInert(false);
   resetPending();
   state.lastFocusedElement?.focus?.();
   state.lastFocusedElement = null;
+  if (shouldPopHistory) history.back();
+}
+
+function hideToast() {
+  clearTimeout(state.undoTimer);
+  state.undoTimer = null;
+  $("toast").classList.remove("show");
+  $("toast").hidden = true;
+}
+
+function offerDeleteUndo(entry, index, key) {
+  hideToast();
+  state.deletedEntry = { entry, index, key };
+  $("toastMessage").textContent = `已删除“${entry.name || "这条记录"}”`;
+  $("toast").hidden = false;
+  $("toast").classList.add("show");
+  state.undoTimer = setTimeout(() => {
+    state.deletedEntry = null;
+    hideToast();
+  }, 5000);
 }
 
 function showSettings() {
@@ -208,8 +261,8 @@ function showSettings() {
     </div>
     <div class="settings-error" id="settingsError" role="alert"></div>
     <div class="sheet-actions">
-      <button class="btn-cancel js-close">取消</button>
-      <button class="btn-save" id="saveSettingsBtn">保存</button>
+      <button type="button" class="btn-cancel js-close">取消</button>
+      <button type="button" class="btn-save" id="saveSettingsBtn">保存</button>
     </div>`);
 
   const providerSelect = $("setProvider");
@@ -382,8 +435,8 @@ function showCapturePreview(dataUrl) {
       <div class="hint">补充份量、价格或品牌等信息，可以提高估算准确度。</div>
     </div>
     <div class="sheet-actions">
-      <button class="btn-cancel js-close">取消</button>
-      <button class="btn-save" id="startAnalyzeBtn">开始识别</button>
+      <button type="button" class="btn-cancel js-close">取消</button>
+      <button type="button" class="btn-save" id="startAnalyzeBtn">开始识别</button>
     </div>`);
   $("startAnalyzeBtn").addEventListener("click", () => runAnalyze(image, $("noteInput").value.trim()));
 }
@@ -392,13 +445,14 @@ function showError(message, dataUrl = "") {
   const image = safeImageDataUrl(dataUrl);
   showSheet(`${image ? `<img src="${image}" alt="食物照片">` : ""}
     <div class="error-msg">${escapeHtml(message)}</div>
-    <div class="sheet-actions"><button class="btn-cancel js-close">关闭</button></div>`);
+    <div class="sheet-actions"><button type="button" class="btn-cancel js-close">关闭</button></div>`);
 }
 
 async function runAnalyze(dataUrl, note) {
+  const requestId = ++state.analysisRequest;
   state.pendingNote = note.slice(0, 500);
   showSheet(`<img src="${dataUrl}" alt="食物照片">
-    <div class="loading"><div class="spinner"></div>正在识别食物…</div>`);
+    <div class="loading" role="status" aria-live="polite"><div class="spinner"></div>正在识别食物…</div>`);
   try {
     const settings = getSettings();
     const result = await analyzeFood({
@@ -407,13 +461,15 @@ async function runAnalyze(dataUrl, note) {
       imageBase64: dataUrl.split(",")[1],
       note: state.pendingNote,
     });
+    if (requestId !== state.analysisRequest) return;
     showResult(dataUrl, result);
   } catch (error) {
+    if (requestId !== state.analysisRequest) return;
     showSheet(`<img src="${dataUrl}" alt="食物照片">
       <div class="error-msg">${escapeHtml(error.message || "识别失败，请重试")}</div>
       <div class="sheet-actions">
-        <button class="btn-cancel js-close">关闭</button>
-        <button class="btn-save" id="retryBtn">返回修改</button>
+        <button type="button" class="btn-cancel js-close">关闭</button>
+        <button type="button" class="btn-save" id="retryBtn">返回修改</button>
       </div>`);
     $("retryBtn").addEventListener("click", () => showCapturePreview(dataUrl));
   }
@@ -436,8 +492,8 @@ function showResult(dataUrl, value) {
     <div class="result-total"><span>合计</span><span>${result.total_calories} 千卡</span></div>
     <div class="confidence">${CONFIDENCE_LABEL[result.confidence]}${result.notes ? ` · ${escapeHtml(result.notes)}` : ""}</div>
     <div class="sheet-actions">
-      <button class="btn-cancel js-close">取消</button>
-      <button class="btn-save" id="saveEntryBtn">${isToday(state.viewDate) ? "记入今日" : "记入当日"}</button>
+      <button type="button" class="btn-cancel js-close">取消</button>
+      <button type="button" class="btn-save" id="saveEntryBtn">${isToday(state.viewDate) ? "记入今日" : "记入当日"}</button>
     </div>`);
   $("saveEntryBtn").addEventListener("click", saveEntry);
 }
@@ -481,13 +537,18 @@ $("fileInput").addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   event.target.value = "";
   if (!file) return;
+  let requestId = 0;
   try {
     if (!file.type.startsWith("image/")) throw new Error("请选择图片文件");
     if (file.size > 25 * 1024 * 1024) throw new Error("原图不能超过 25 MB");
+    requestId = ++state.imageRequest;
+    showSheet(`<div class="loading" role="status" aria-live="polite"><div class="spinner"></div>正在优化照片…</div>`);
     const { dataUrl, thumb } = await compressImage(file);
+    if (requestId !== state.imageRequest) return;
     state.pendingThumb = thumb;
     showCapturePreview(dataUrl);
   } catch (error) {
+    if (requestId && requestId !== state.imageRequest) return;
     showError(error.message || "图片读取失败");
   }
 });
@@ -497,16 +558,54 @@ $("entryList").addEventListener("click", (event) => {
   const index = Number.parseInt(button.dataset.index, 10);
   const log = getLog();
   if (!Number.isInteger(index) || index < 0 || index >= log.length) return;
-  log.splice(index, 1);
+  const [entry] = log.splice(index, 1);
+  const key = logKey();
   saveLog(log);
   render();
+  offerDeleteUndo(entry, index, key);
 });
 $("overlay").addEventListener("click", (event) => {
   if (event.target === $("overlay") || event.target.closest(".js-close")) hideSheet();
 });
 $("editGoal").addEventListener("click", showSettings);
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && $("overlay").classList.contains("show")) hideSheet();
+  if (!$("overlay").classList.contains("show")) return;
+  if (event.key === "Escape") {
+    hideSheet();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = [...$("sheet").querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex='-1'])")]
+    .filter((element) => !element.hidden && element.offsetParent !== null);
+  if (!focusable.length) {
+    event.preventDefault();
+    $("sheet").focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+});
+window.addEventListener("popstate", () => {
+  if ($("overlay").classList.contains("show")) hideSheet({ fromHistory: true });
+});
+$("undoDeleteBtn").addEventListener("click", () => {
+  const deletion = state.deletedEntry;
+  if (!deletion) return;
+  const log = readJson(deletion.key, []);
+  if (Array.isArray(log)) {
+    log.splice(Math.min(deletion.index, log.length), 0, deletion.entry);
+    localStorage.setItem(deletion.key, JSON.stringify(log));
+  }
+  state.deletedEntry = null;
+  hideToast();
+  if (deletion.key === logKey()) render();
 });
 
 render();

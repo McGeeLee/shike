@@ -42,9 +42,13 @@ public/analyze.js        服务商配置、请求校验和模型结果归一化
 
 项目只保留 Android App 路径，没有 Node/Express 服务端，也没有需要部署的 Web 端。模型适配和结果解析只有一份实现，避免 App 与服务端逻辑漂移。
 
+当前 Android 技术栈：Android 17（compile/target SDK 37）、Capacitor 8.5、Android Gradle Plugin 9.3.1、Gradle 9.5、Java 21，以及稳定版 AndroidX Activity/Core/WebKit。发布构建启用 R8 代码压缩与资源收缩。
+
+界面已适配强制 edge-to-edge、安全区、软键盘与动态视口；手机保持单栏，平板和横屏使用双栏。底部面板支持系统返回键、焦点约束和异步取消，误删记录可在 5 秒内撤销。
+
 ## 开发与运行
 
-需要 Node.js 22+、Android Studio 和可用的 Android SDK/JDK。
+需要 Node.js 22+、Android Studio、Android 17 SDK，以及 JDK 21。Android Studio 自带的 JetBrains Runtime 可以直接作为 Gradle JDK。
 
 ```bash
 git clone https://github.com/McGeeLee/shike.git
@@ -67,9 +71,12 @@ npm run build:android
 
 ```bash
 npm run check
+npm run check:android
 ```
 
-检查包含 JavaScript 语法、模型发现、模型响应容错、HTTPS 地址校验、服务商请求结构，以及纯 App 架构回归测试。GitHub Actions 会在 Pull Request 上执行同一组检查。
+第一条命令检查 JavaScript 语法、模型发现、模型响应容错、HTTPS 地址校验、服务商请求结构，以及 Android 17/edge-to-edge 回归约束。第二条命令同步 Web 资源并运行 Android Lint 与 JVM 测试。GitHub Actions 会在 Pull Request 上执行 Web/Node 检查。
+
+本次平台迁移依据 [Android 17 SDK 配置](https://developer.android.com/about/versions/17/setup-sdk)、[Android 17 目标版本行为变更](https://developer.android.com/about/versions/17/behavior-changes-17)、[AGP 9.3 发布说明](https://developer.android.com/build/releases/agp-9-3-0-release-notes) 和 [Views edge-to-edge 指南](https://developer.android.com/develop/ui/views/layout/edge-to-edge)。
 
 ## 隐私与安全
 

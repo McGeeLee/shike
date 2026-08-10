@@ -9,36 +9,39 @@ if (releaseSigningPropertiesFile.exists()) {
 android {
     namespace = "com.gee.eatapp"
     compileSdk = rootProject.ext.compileSdkVersion
+    enableKotlin = false
+
     defaultConfig {
-        applicationId "com.gee.eatapp"
-        minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        aaptOptions {
-             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
-             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
-            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
-        }
+        applicationId = "com.gee.eatapp"
+        minSdk = rootProject.ext.minSdkVersion
+        targetSdk = rootProject.ext.targetSdkVersion
+        versionCode = 1
+        versionName = "1.0.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    androidResources {
+        // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+        // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+        ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
     signingConfigs {
         release {
             if (releaseSigningPropertiesFile.exists()) {
-                storeFile rootProject.file(releaseSigningProperties['storeFile'])
-                storePassword rootProject.file(releaseSigningProperties['storePasswordFile']).text.trim()
-                keyAlias releaseSigningProperties['keyAlias']
-                keyPassword rootProject.file(releaseSigningProperties['keyPasswordFile']).text.trim()
+                storeFile = rootProject.file(releaseSigningProperties['storeFile'])
+                storePassword = rootProject.file(releaseSigningProperties['storePasswordFile']).text.trim()
+                keyAlias = releaseSigningProperties['keyAlias']
+                keyPassword = rootProject.file(releaseSigningProperties['keyPasswordFile']).text.trim()
             }
         }
     }
     buildTypes {
         release {
             if (releaseSigningPropertiesFile.exists()) {
-                signingConfig signingConfigs.release
+                signingConfig = signingConfigs.release
             }
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            minifyEnabled = true
+            shrinkResources = true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 }
@@ -62,12 +65,3 @@ dependencies {
 }
 
 apply from: 'capacitor.build.gradle'
-
-try {
-    def servicesJSON = file('google-services.json')
-    if (servicesJSON.text) {
-        apply plugin: 'com.google.gms.google-services'
-    }
-} catch(Exception e) {
-    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
-}

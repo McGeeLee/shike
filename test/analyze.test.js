@@ -26,16 +26,42 @@ describe("Android app bundle", () => {
     const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
     const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
     const analyzer = readFileSync(new URL("../public/analyze.js", import.meta.url), "utf8");
+    const styles = readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
     assert.match(html, /type="module" src="\.\/app\.js"/);
     assert.doesNotMatch(`${html}${app}${analyzer}`, /\/api\/analyze|\/api\/config|IS_APP|LOCAL_PROVIDERS/);
     assert.match(app, /自动获取模型/);
     assert.match(app, /测试连接/);
     assert.match(app, /<select id="setCustomModel">/);
     assert.match(app, /listAvailableModels/);
+    assert.match(app, /history\.pushState\(\{ shikeSheet: true \}/);
+    assert.match(app, /offerDeleteUndo/);
+    assert.match(styles, /--safe-area-inset-top/);
+    assert.match(styles, /@media \(min-width: 760px\)/);
+    assert.match(html, /id="calorieProgress" role="progressbar"/);
+    assert.match(html, /id="undoDeleteBtn"/);
   });
 
   it("keeps only image-capable providers and a custom endpoint", () => {
     assert.deepEqual(PROVIDERS.map((provider) => provider.id), ["claude", "openai", "qwen", "zhipu", "custom"]);
+  });
+
+  it("targets Android 17 with modern edge-to-edge and build tooling", () => {
+    const variables = readFileSync(new URL("../android/variables.gradle", import.meta.url), "utf8");
+    const rootBuild = readFileSync(new URL("../android/build.gradle", import.meta.url), "utf8");
+    const appBuild = readFileSync(new URL("../android/app/build.gradle", import.meta.url), "utf8");
+    const manifest = readFileSync(new URL("../android/app/src/main/AndroidManifest.xml", import.meta.url), "utf8");
+    const activity = readFileSync(new URL("../android/app/src/main/java/com/gee/eatapp/MainActivity.java", import.meta.url), "utf8");
+    const capacitorConfig = JSON.parse(readFileSync(new URL("../capacitor.config.json", import.meta.url), "utf8"));
+
+    assert.match(variables, /compileSdkVersion = 37/);
+    assert.match(variables, /targetSdkVersion = 37/);
+    assert.match(rootBuild, /com\.android\.tools\.build:gradle:9\.3\.1/);
+    assert.match(appBuild, /enableKotlin = false/);
+    assert.match(appBuild, /proguard-android-optimize\.txt/);
+    assert.match(manifest, /android:windowSoftInputMode="adjustResize"/);
+    assert.match(activity, /EdgeToEdge\.enable\(this\)/);
+    assert.equal(capacitorConfig.plugins.SystemBars.insetsHandling, "css");
+    assert.equal(capacitorConfig.plugins.SystemBars.style, "LIGHT");
   });
 });
 

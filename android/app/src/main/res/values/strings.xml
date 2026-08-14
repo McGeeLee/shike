@@ -2,6 +2,8 @@
 <resources>
     <string name="app_name">食刻</string>
     <string name="title_activity_main">食刻</string>
-    <string name="package_name">com.gee.eatapp</string>
-    <string name="custom_url_scheme">com.gee.eatapp</string>
+    <string name="shortcut_add_meal_short">拍照记餐</string>
+    <string name="shortcut_add_meal_long">拍照记录一餐</string>
+    <string name="shortcut_settings_short">模型设置</string>
+    <string name="shortcut_settings_long">模型与热量设置</string>
 </resources>

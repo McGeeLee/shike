@@ -27,6 +27,7 @@
 - 从 `/v1/models` 自动读取当前 API Key 可用的模型，并可在设置页测试连接；
 - 长按桌面图标可直接“拍照记餐”或打开“模型设置”；
 - 内置完整“食刻”Material 3 品牌色方案，并可在设置中选择是否跟随系统壁纸动态配色（默认关闭）；
+- 每 24 小时自动检查 GitHub 最新稳定版本，支持在 App 内下载、校验并交给系统安装器更新；
 - 手机保持单栏布局，平板和横屏自动切换为双栏。
 
 <p>
@@ -44,6 +45,7 @@ data/ShikeRepository.kt        原生本地记录与设置
 data/SecureApiKeyStore.kt      Android Keystore 加密 API Key
 image/ImageProcessor.kt        EXIF 方向修正、图片压缩和缩略图
 network/FoodAnalysisClient.kt  HTTPS 模型发现与视觉识别请求
+update/AppUpdateClient.kt      GitHub Release 检查、版本比较与自动检查节流
 ```
 
 项目不再包含 Capacitor、WebView UI、Node.js 或前端构建链。界面使用 Kotlin、Jetpack Compose 和 Material 3 原生组件；状态由 ViewModel 管理，系统返回手势可直接驱动原生对话框和底部面板。
@@ -66,11 +68,45 @@ cd shike/android
 
 正式发行时，将 `android/release-signing.properties.example` 复制为 `android/release-signing.properties`，按示例路径准备签名证书和密码文件，再运行 `./gradlew assembleRelease`。签名材料已被 Git 忽略，升级同一个 App 必须持续使用同一证书。
 
+## 自动更新与 CI/CD
+
+App 启动后至多每 24 小时请求一次本仓库的 GitHub 最新稳定 Release；检查失败时不会打扰正常使用。设置页的“检查更新”不受节流限制。发现更高版本后，Material 3 对话框会显示 Release Notes，在 App 私有目录下载匹配版本的已签名 APK 和校验文件，SHA-256 一致后才会唤起 Android 系统安装器。App 不内置 GitHub Token，也不会绕过系统确认静默安装 APK；Release 页面保留为下载失败时的备用入口。
+
+`.github/workflows/ci.yml` 会在 `main` 推送、Pull Request 和手动触发时运行单元测试、Compose 测试源码编译、Lint、Debug 构建和 R8 Release 构建。`.github/workflows/release.yml` 会在推送 `vMAJOR.MINOR.PATCH` 标签时校验标签与 `versionName` 一致，完成测试、Lint、签名构建和签名校验，生成 SHA-256 后创建 GitHub Release。已有标签也可从 Actions 页面手动触发发布。
+
+在首次自动发布前，需要在仓库 `Settings → Secrets and variables → Actions` 配置以下 Secrets：
+
+| Secret | 内容 |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | 发布证书文件的单行 Base64 内容 |
+| `ANDROID_STORE_PASSWORD` | KeyStore 密码 |
+| `ANDROID_KEY_ALIAS` | 签名 Key 的 alias |
+| `ANDROID_KEY_PASSWORD` | 签名 Key 密码 |
+
+可以在本机已登录 GitHub CLI 后配置，例如：
+
+```bash
+base64 < android/.signing/shike-release.p12 | tr -d '\n' | gh secret set ANDROID_KEYSTORE_BASE64
+printf '%s' 'your-store-password' | gh secret set ANDROID_STORE_PASSWORD
+printf '%s' 'shike-release' | gh secret set ANDROID_KEY_ALIAS
+printf '%s' 'your-key-password' | gh secret set ANDROID_KEY_PASSWORD
+```
+
+发布时先递增 `versionCode` 和 `versionName`，提交后创建同版本标签并推送：
+
+```bash
+git tag -a v2.1.0 -m "食刻 2.1.0"
+git push origin main
+git push origin v2.1.0
+```
+
+不要更换证书或丢失密码；否则已安装版本无法直接升级。若设备从浏览器安装 APK，Android 可能要求用户为该浏览器单独授权“安装未知应用”。
+
 ## 验证
 
 ```bash
 cd android
-./gradlew testDebugUnitTest compileDebugAndroidTestKotlin lintDebug assembleDebug
+./gradlew testDebugUnitTest compileDebugAndroidTestKotlin lintDebug assembleDebug assembleRelease
 # 连接 Android 设备或启动模拟器后
 ./gradlew connectedDebugAndroidTest
 ```
@@ -86,6 +122,7 @@ cd android
 - 食物照片在设备端压缩，只直接发送给用户选择的模型服务商；App 不长期保存原图。
 - 自定义接口必须使用 HTTPS；原生网络策略拒绝明文 HTTP，并在 Android 17 上启用证书透明度与 ECH。
 - App 不申请相册读取权限；相册访问由系统 Photo Picker 授予单张图片权限。
+- 更新包只接受本仓库 GitHub Release 的 HTTPS 资产，下载到 App 私有目录并通过 SHA-256 后才共享给系统安装器；“安装未知应用”授权由用户在系统设置中单独控制。
 
 ## 后续方向
 

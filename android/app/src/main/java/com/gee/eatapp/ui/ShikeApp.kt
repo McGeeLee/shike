@@ -1,11 +1,13 @@
 package com.gee.eatapp.ui
 
 import android.content.Context
+import android.content.ClipData
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -77,6 +79,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -100,17 +103,20 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import com.gee.eatapp.BuildConfig
 import com.gee.eatapp.data.AppSettings
 import com.gee.eatapp.data.MealEntry
 import com.gee.eatapp.data.ProviderCatalog
 import com.gee.eatapp.data.effectiveModel
 import com.gee.eatapp.data.simplifiedChinese
 import com.gee.eatapp.image.PreparedImage
+import com.gee.eatapp.update.AppRelease
 import com.gee.eatapp.ui.theme.ShikeDimensions
 import com.gee.eatapp.ui.theme.ShikeTheme
 import java.io.File
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
@@ -118,8 +124,10 @@ fun ShikeApp(viewModel: ShikeViewModel) {
     val state = viewModel.uiState
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
     var showImageSourceDialog by rememberSaveable { mutableStateOf(false) }
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingInstallPath by rememberSaveable { mutableStateOf<String?>(null) }
 
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) viewModel.prepareImage(uri)
@@ -128,6 +136,20 @@ fun ShikeApp(viewModel: ShikeViewModel) {
         val uri = pendingCameraUri
         pendingCameraUri = null
         if (captured && uri != null) viewModel.prepareImage(uri)
+    }
+    val unknownSourcesLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        val path = pendingInstallPath
+        pendingInstallPath = null
+        if (path != null) {
+            val message = when {
+                !canInstallPackages(context) -> "未授予安装未知应用权限"
+                !openPackageInstaller(context, path) -> "无法打开系统安装器"
+                else -> null
+            }
+            if (message != null) viewModel.reportUpdateInstallError(message)
+        }
     }
 
     LaunchedEffect(state.imageSourceRequestId) {
@@ -189,6 +211,10 @@ fun ShikeApp(viewModel: ShikeViewModel) {
             onApiKeyChanged = viewModel::updateApiKey,
             onGoalChanged = viewModel::updateGoal,
             onDynamicColorChanged = viewModel::updateDynamicColor,
+            currentVersionName = BuildConfig.VERSION_NAME,
+            isCheckingForUpdate = state.isCheckingForUpdate,
+            updateStatusMessage = state.updateStatusMessage,
+            onCheckForUpdate = { viewModel.checkForUpdate() },
             onFetchModels = { viewModel.discoverModels(false) },
             onTestConnection = { viewModel.discoverModels(true) },
             onSave = viewModel::saveSettings,
@@ -204,6 +230,48 @@ fun ShikeApp(viewModel: ShikeViewModel) {
             onAnalyze = viewModel::analyzeMeal,
             onRetry = viewModel::retryMeal,
             onSave = viewModel::saveMeal,
+        )
+    }
+
+    state.availableUpdate?.let { release ->
+        UpdateAvailableDialog(
+            release = release,
+            currentVersionName = BuildConfig.VERSION_NAME,
+            isDownloading = state.isDownloadingUpdate,
+            downloaded = state.downloadedUpdatePath != null,
+            statusMessage = state.updateStatusMessage,
+            onDismiss = viewModel::dismissUpdate,
+            onCancelDownload = viewModel::cancelUpdateDownload,
+            onDownload = viewModel::downloadUpdate,
+            onInstall = {
+                state.downloadedUpdatePath?.let { path ->
+                    if (canInstallPackages(context)) {
+                        if (!openPackageInstaller(context, path)) {
+                            viewModel.reportUpdateInstallError("无法打开系统安装器")
+                        }
+                    } else {
+                        pendingInstallPath = path
+                        val intent = Intent(
+                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:${context.packageName}"),
+                        )
+                        runCatching { unknownSourcesLauncher.launch(intent) }
+                            .onFailure {
+                                pendingInstallPath = null
+                                viewModel.reportUpdateInstallError("无法打开安装权限设置")
+                            }
+                    }
+                }
+            },
+            onOpenRelease = {
+                if (openReleasePage(context, release.releaseUrl)) {
+                    viewModel.dismissUpdate()
+                } else {
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar("未找到可打开更新页面的应用")
+                    }
+                }
+            },
         )
     }
 }
@@ -572,6 +640,10 @@ private fun SettingsSheet(
     onApiKeyChanged: (String) -> Unit,
     onGoalChanged: (String) -> Unit,
     onDynamicColorChanged: (Boolean) -> Unit,
+    currentVersionName: String,
+    isCheckingForUpdate: Boolean,
+    updateStatusMessage: String,
+    onCheckForUpdate: () -> Unit,
     onFetchModels: () -> Unit,
     onTestConnection: () -> Unit,
     onSave: () -> Unit,
@@ -672,6 +744,13 @@ private fun SettingsSheet(
                 available = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
                 onChanged = onDynamicColorChanged,
             )
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            UpdateCheckSetting(
+                currentVersionName = currentVersionName,
+                isChecking = isCheckingForUpdate,
+                statusMessage = updateStatusMessage,
+                onCheck = onCheckForUpdate,
+            )
             Text(
                 draft.errorMessage,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 28.dp).padding(top = 6.dp),
@@ -687,6 +766,144 @@ private fun SettingsSheet(
             }
         }
     }
+}
+
+@Composable
+internal fun UpdateCheckSetting(
+    currentVersionName: String,
+    isChecking: Boolean,
+    statusMessage: String,
+    onCheck: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("应用更新", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                "当前版本 v$currentVersionName",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (statusMessage.isNotBlank()) {
+                Text(
+                    statusMessage,
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        OutlinedButton(
+            onClick = onCheck,
+            enabled = !isChecking,
+            modifier = Modifier.testTag("checkForUpdateButton"),
+        ) {
+            if (isChecking) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(if (isChecking) "检查中" else "检查更新")
+        }
+    }
+}
+
+@Composable
+internal fun UpdateAvailableDialog(
+    release: AppRelease,
+    currentVersionName: String,
+    isDownloading: Boolean,
+    downloaded: Boolean,
+    statusMessage: String,
+    onDismiss: () -> Unit,
+    onCancelDownload: () -> Unit,
+    onDownload: () -> Unit,
+    onInstall: () -> Unit,
+    onOpenRelease: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (isDownloading) onCancelDownload() else onDismiss() },
+        title = { Text("发现新版本 v${release.versionName}") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 360.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    "当前版本 v$currentVersionName。食刻会下载已签名 APK、校验 SHA-256，再交给 Android 系统安装器确认安装。",
+                )
+                Text(
+                    "更新内容",
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    release.releaseNotes.ifBlank { "本次发布暂未提供更新说明。" },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (isDownloading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                if (
+                    statusMessage.isNotBlank() &&
+                    statusMessage != "发现新版本 v${release.versionName}"
+                ) {
+                    Text(
+                        statusMessage,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text(
+                    "Android 8 或更高版本首次安装时，系统可能要求授权食刻安装未知应用。安装操作始终需要你的确认。",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = if (downloaded) onInstall else onDownload,
+                enabled = !isDownloading,
+                modifier = Modifier.testTag("updateActionButton"),
+            ) {
+                if (isDownloading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(
+                    when {
+                        isDownloading -> "下载中"
+                        downloaded -> "安装更新"
+                        else -> "下载更新"
+                    },
+                )
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(
+                    onClick = onOpenRelease,
+                    enabled = !isDownloading,
+                    modifier = Modifier.testTag("openUpdateReleaseButton"),
+                ) { Text("发布页") }
+                TextButton(onClick = if (isDownloading) onCancelDownload else onDismiss) {
+                    Text(if (isDownloading) "取消下载" else "稍后")
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -915,6 +1132,39 @@ private fun createCaptureUri(context: Context): Uri {
     val directory = File(context.cacheDir, "images").apply { mkdirs() }
     val file = File.createTempFile("meal_", ".jpg", directory)
     return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+}
+
+private fun openReleasePage(context: Context, releaseUrl: String): Boolean {
+    val uri = runCatching { Uri.parse(releaseUrl) }.getOrNull() ?: return false
+    val trusted = uri.scheme.equals("https", ignoreCase = true) &&
+        uri.host.equals("github.com", ignoreCase = true) &&
+        uri.path?.startsWith("/McGeeLee/shike/releases/") == true
+    if (!trusted) return false
+
+    val intent = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
+    if (intent.resolveActivity(context.packageManager) == null) return false
+    return runCatching { context.startActivity(intent) }.isSuccess
+}
+
+private fun canInstallPackages(context: Context): Boolean =
+    Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
+
+private fun openPackageInstaller(context: Context, apkPath: String): Boolean {
+    val updateDirectory = runCatching { File(context.filesDir, "updates").canonicalFile }.getOrNull()
+        ?: return false
+    val apk = runCatching { File(apkPath).canonicalFile }.getOrNull() ?: return false
+    if (apk.parentFile != updateDirectory || !apk.isFile || apk.extension.lowercase() != "apk") return false
+
+    val uri = runCatching {
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
+    }.getOrNull() ?: return false
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, "application/vnd.android.package-archive")
+        clipData = ClipData.newRawUri("食刻更新包", uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    if (intent.resolveActivity(context.packageManager) == null) return false
+    return runCatching { context.startActivity(intent) }.isSuccess
 }
 
 private fun dateLabel(date: LocalDate): String {

@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.gee.eatapp.BuildConfig
 import com.gee.eatapp.data.AnalysisResult
 import com.gee.eatapp.data.AppSettings
 import com.gee.eatapp.data.Confidence
@@ -20,12 +21,17 @@ import com.gee.eatapp.data.normalizeBaseUrl
 import com.gee.eatapp.image.ImageProcessor
 import com.gee.eatapp.image.PreparedImage
 import com.gee.eatapp.network.FoodAnalysisClient
+import com.gee.eatapp.update.AppRelease
+import com.gee.eatapp.update.AppUpdateClient
+import com.gee.eatapp.update.UpdateCheckStore
+import com.gee.eatapp.update.isNewerVersion
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import java.io.File
 import java.util.UUID
 
 enum class ConnectionStatusKind { IDLE, LOADING, SUCCESS, ERROR }
@@ -63,6 +69,11 @@ data class ShikeUiState(
     val mealPanel: MealPanel = MealPanel.Hidden,
     val imageSourceRequestId: Long = 0,
     val deletedMeal: DeletedMeal? = null,
+    val availableUpdate: AppRelease? = null,
+    val isCheckingForUpdate: Boolean = false,
+    val isDownloadingUpdate: Boolean = false,
+    val downloadedUpdatePath: String? = null,
+    val updateStatusMessage: String = "",
 ) {
     val summary: DailySummary get() = DailySummary.from(entries)
 }
@@ -70,13 +81,20 @@ data class ShikeUiState(
 class ShikeViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = ShikeRepository(application)
     private val analysisClient = FoodAnalysisClient()
+    private val updateClient = AppUpdateClient()
+    private val updateCheckStore = UpdateCheckStore(application)
     private val imageProcessor = ImageProcessor(application.contentResolver)
     private var imageJob: Job? = null
     private var analysisJob: Job? = null
+    private var updateDownloadJob: Job? = null
     private var eventCounter = 0L
 
     var uiState by mutableStateOf(loadState(LocalDate.now()))
         private set
+
+    init {
+        checkForUpdate(manual = false)
+    }
 
     fun previousDay() = selectDate(uiState.selectedDate.minusDays(1))
 
@@ -263,6 +281,110 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
         it.copy(dynamicColorEnabled = enabled)
     }
 
+    fun checkForUpdate(manual: Boolean = true) {
+        if (uiState.isCheckingForUpdate) return
+        if (!manual && !updateCheckStore.shouldAutoCheck()) return
+        updateCheckStore.recordAttempt()
+        uiState = uiState.copy(
+            isCheckingForUpdate = true,
+            updateStatusMessage = if (manual) "正在检查新版本…" else "",
+        )
+        viewModelScope.launch {
+            runCatching { updateClient.latestRelease(BuildConfig.VERSION_NAME) }
+                .onSuccess { release ->
+                    val update = release?.takeIf {
+                        isNewerVersion(it.versionName, BuildConfig.VERSION_NAME)
+                    }
+                    uiState = uiState.copy(
+                        availableUpdate = update ?: uiState.availableUpdate,
+                        isCheckingForUpdate = false,
+                        downloadedUpdatePath = if (
+                            update != null && update.versionName != uiState.availableUpdate?.versionName
+                        ) {
+                            null
+                        } else {
+                            uiState.downloadedUpdatePath
+                        },
+                        updateStatusMessage = when {
+                            update != null -> "发现新版本 v${update.versionName}"
+                            manual && release == null -> "暂未找到已发布版本"
+                            manual -> "当前已是最新版本"
+                            else -> ""
+                        },
+                    )
+                }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    uiState = uiState.copy(
+                        isCheckingForUpdate = false,
+                        updateStatusMessage = if (manual) {
+                            error.message ?: "检查失败，请稍后重试"
+                        } else {
+                            ""
+                        },
+                    )
+                }
+        }
+    }
+
+    fun dismissUpdate() {
+        updateDownloadJob?.cancel()
+        uiState.downloadedUpdatePath?.let { File(it).delete() }
+        uiState = uiState.copy(
+            availableUpdate = null,
+            isDownloadingUpdate = false,
+            downloadedUpdatePath = null,
+        )
+    }
+
+    fun downloadUpdate() {
+        val release = uiState.availableUpdate ?: return
+        if (uiState.isDownloadingUpdate) return
+        updateDownloadJob?.cancel()
+        uiState = uiState.copy(
+            isDownloadingUpdate = true,
+            downloadedUpdatePath = null,
+            updateStatusMessage = "正在下载并校验更新包…",
+        )
+        updateDownloadJob = viewModelScope.launch {
+            try {
+                val apk = updateClient.downloadRelease(getApplication(), release)
+                uiState = uiState.copy(
+                    isDownloadingUpdate = false,
+                    downloadedUpdatePath = apk.absolutePath,
+                    updateStatusMessage = "下载完成并已通过 SHA-256 校验",
+                )
+            } catch (error: CancellationException) {
+                uiState = uiState.copy(
+                    isDownloadingUpdate = false,
+                    updateStatusMessage = "已取消下载",
+                )
+                throw error
+            } catch (error: Throwable) {
+                uiState = uiState.copy(
+                    isDownloadingUpdate = false,
+                    updateStatusMessage = error.message ?: "更新包下载失败，请重试",
+                )
+            } finally {
+                updateDownloadJob = null
+            }
+        }
+    }
+
+    fun cancelUpdateDownload() {
+        updateDownloadJob?.cancel()
+        updateDownloadJob = null
+        uiState = uiState.copy(
+            isDownloadingUpdate = false,
+            updateStatusMessage = "已取消下载",
+        )
+    }
+
+    fun reportUpdateInstallError(message: String) {
+        if (uiState.availableUpdate == null) return
+        uiState = uiState.copy(updateStatusMessage = message)
+    }
+
     fun discoverModels(connectionTest: Boolean) {
         val draft = uiState.settingsDraft ?: return
         val requestSettings = draft.toSettings()
@@ -344,6 +466,11 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
         uiState = loadState(uiState.selectedDate).copy(
             settingsDraft = uiState.settingsDraft,
             mealPanel = uiState.mealPanel,
+            availableUpdate = uiState.availableUpdate,
+            isCheckingForUpdate = uiState.isCheckingForUpdate,
+            isDownloadingUpdate = uiState.isDownloadingUpdate,
+            downloadedUpdatePath = uiState.downloadedUpdatePath,
+            updateStatusMessage = uiState.updateStatusMessage,
         )
     }
 

@@ -94,7 +94,7 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
         private set
 
     init {
-        checkForUpdate(manual = false)
+        if (BuildConfig.IN_APP_UPDATES_ENABLED) checkForUpdate(manual = false)
     }
 
     fun previousDay() = selectDate(uiState.selectedDate.minusDays(1))
@@ -283,6 +283,20 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun checkForUpdate(manual: Boolean = true) {
+        if (!BuildConfig.IN_APP_UPDATES_ENABLED) {
+            uiState = uiState.copy(
+                availableUpdate = null,
+                isCheckingForUpdate = false,
+                isDownloadingUpdate = false,
+                downloadedUpdatePath = null,
+                updateStatusMessage = if (manual) {
+                    "Debug 构建使用独立包名，应用内更新仅在正式版启用"
+                } else {
+                    ""
+                },
+            )
+            return
+        }
         if (uiState.isCheckingForUpdate) return
         if (!manual && !updateCheckStore.shouldAutoCheck()) return
         updateCheckStore.recordAttempt()
@@ -364,7 +378,7 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
             } catch (error: Throwable) {
                 uiState = uiState.copy(
                     isDownloadingUpdate = false,
-                    updateStatusMessage = error.message ?: "更新包下载失败，请重试",
+                    updateStatusMessage = "下载失败：${error.message ?: "请稍后重试"}",
                 )
             } finally {
                 updateDownloadJob = null

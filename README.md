@@ -97,9 +97,9 @@ printf '%s' 'your-key-password' | gh secret set ANDROID_KEY_PASSWORD
 发布时先递增 `versionCode` 和 `versionName`，提交后创建同版本标签并推送：
 
 ```bash
-git tag -a v2.2.0 -m "食刻 2.2.0"
+git tag -a v2.2.1 -m "食刻 2.2.1"
 git push origin main
-git push origin v2.2.0
+git push origin v2.2.1
 ```
 
 不要更换证书或丢失密码；否则已安装版本无法直接升级。若设备从浏览器安装 APK，Android 可能要求用户为该浏览器单独授权“安装未知应用”。

@@ -18,8 +18,8 @@ android {
         applicationId = "com.gee.eatapp"
         minSdk = rootProject.ext.minSdkVersion
         targetSdk = rootProject.ext.targetSdkVersion
-        versionCode = 4
-        versionName = "2.2.0"
+        versionCode = 5
+        versionName = "2.2.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
@@ -45,8 +45,10 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            buildConfigField 'boolean', 'IN_APP_UPDATES_ENABLED', 'false'
         }
         release {
+            buildConfigField 'boolean', 'IN_APP_UPDATES_ENABLED', 'true'
             if (releaseSigningPropertiesFile.exists()) {
                 signingConfig = signingConfigs.release
             }

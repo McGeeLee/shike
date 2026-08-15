@@ -41,12 +41,21 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.CameraAlt
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -70,6 +79,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -97,6 +107,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -631,7 +642,7 @@ private fun ImageSourceDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsSheet(
+internal fun SettingsSheet(
     draft: SettingsDraft,
     modelChoices: List<ModelChoice>,
     onDismiss: () -> Unit,
@@ -683,12 +694,21 @@ private fun SettingsSheet(
                 )
             }
             Spacer(Modifier.height(14.dp))
+            ConnectionPanel(
+                draft = draft,
+                onBaseUrlChanged = onBaseUrlChanged,
+                onApiKeyChanged = onApiKeyChanged,
+                onFetchModels = onFetchModels,
+                onTestConnection = onTestConnection,
+            )
+            Spacer(Modifier.height(14.dp))
             DropdownField(
                 label = if (draft.providerId == "custom") "可用模型" else "模型",
                 selectedId = draft.selectedModel,
                 options = modelChoices,
                 onSelected = onModelSelected,
                 placeholder = "请先自动获取模型",
+                modifier = Modifier.testTag("modelField"),
             )
             if (draft.providerId == "custom") {
                 Text(
@@ -696,53 +716,8 @@ private fun SettingsSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
-                Spacer(Modifier.height(14.dp))
-                OutlinedTextField(
-                    value = draft.customBaseUrl,
-                    onValueChange = onBaseUrlChanged,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("接口地址（OpenAI 兼容 Base URL）") },
-                    placeholder = { Text("https://api.example.com/v1") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                )
             }
             Spacer(Modifier.height(14.dp))
-            OutlinedTextField(
-                value = draft.apiKey,
-                onValueChange = onApiKeyChanged,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("API Key") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                supportingText = { Text("密钥使用 Android Keystore 加密后保存在本机。") },
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                OutlinedButton(
-                    onClick = onFetchModels,
-                    enabled = !draft.isLoading,
-                    modifier = Modifier.weight(1f),
-                ) { Text("自动获取模型") }
-                Button(
-                    onClick = onTestConnection,
-                    enabled = !draft.isLoading,
-                    modifier = Modifier.weight(1f),
-                ) { Text("测试连接") }
-            }
-            Text(
-                draft.statusMessage,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 34.dp).padding(top = 6.dp),
-                color = when (draft.statusKind) {
-                    ConnectionStatusKind.SUCCESS -> MaterialTheme.colorScheme.secondary
-                    ConnectionStatusKind.ERROR -> MaterialTheme.colorScheme.error
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                style = MaterialTheme.typography.bodySmall,
-            )
             OutlinedTextField(
                 value = draft.goalInput,
                 onValueChange = onGoalChanged,
@@ -762,6 +737,7 @@ private fun SettingsSheet(
                 currentVersionName = currentVersionName,
                 isChecking = isCheckingForUpdate,
                 statusMessage = updateStatusMessage,
+                updatesSupported = BuildConfig.IN_APP_UPDATES_ENABLED,
                 onCheck = onCheckForUpdate,
             )
             Text(
@@ -782,12 +758,182 @@ private fun SettingsSheet(
 }
 
 @Composable
+private fun ConnectionPanel(
+    draft: SettingsDraft,
+    onBaseUrlChanged: (String) -> Unit,
+    onApiKeyChanged: (String) -> Unit,
+    onFetchModels: () -> Unit,
+    onTestConnection: () -> Unit,
+) {
+    var apiKeyVisible by rememberSaveable(draft.providerId) { mutableStateOf(false) }
+    Surface(
+        modifier = Modifier.fillMaxWidth().testTag("connectionPanel"),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 1.dp,
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ) {
+                    Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Lock, contentDescription = null, modifier = Modifier.size(20.dp))
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(
+                        "模型连接",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "密钥经 Android Keystore 加密，仅保存在本机",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            if (draft.providerId == "custom") {
+                OutlinedTextField(
+                    value = draft.customBaseUrl,
+                    onValueChange = onBaseUrlChanged,
+                    modifier = Modifier.fillMaxWidth().testTag("customBaseUrlField"),
+                    label = { Text("接口地址") },
+                    placeholder = { Text("https://api.example.com/v1") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                )
+                Spacer(Modifier.height(12.dp))
+            }
+            OutlinedTextField(
+                value = draft.apiKey,
+                onValueChange = onApiKeyChanged,
+                modifier = Modifier.fillMaxWidth().testTag("apiKeyField"),
+                label = { Text("API Key") },
+                leadingIcon = { Icon(Icons.Rounded.Key, contentDescription = null) },
+                trailingIcon = {
+                    IconButton(
+                        onClick = { apiKeyVisible = !apiKeyVisible },
+                        modifier = Modifier.testTag("apiKeyVisibilityButton"),
+                    ) {
+                        Icon(
+                            imageVector = if (apiKeyVisible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                            contentDescription = if (apiKeyVisible) "隐藏 API Key" else "显示 API Key",
+                        )
+                    }
+                },
+                singleLine = true,
+                visualTransformation = if (apiKeyVisible) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().testTag("modelConnectionActions"),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onFetchModels,
+                    enabled = !draft.isLoading,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    shape = MaterialTheme.shapes.large,
+                ) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("自动获取模型", maxLines = 1)
+                }
+                Button(
+                    onClick = onTestConnection,
+                    enabled = !draft.isLoading,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    shape = MaterialTheme.shapes.large,
+                ) {
+                    Icon(Icons.Rounded.Link, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("测试连接", maxLines = 1)
+                }
+            }
+            if (draft.statusMessage.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                ConnectionStatusBanner(draft.statusMessage, draft.statusKind)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionStatusBanner(message: String, kind: ConnectionStatusKind) {
+    val containerColor = when (kind) {
+        ConnectionStatusKind.LOADING -> MaterialTheme.colorScheme.primaryContainer
+        ConnectionStatusKind.SUCCESS -> MaterialTheme.colorScheme.secondaryContainer
+        ConnectionStatusKind.ERROR -> MaterialTheme.colorScheme.errorContainer
+        ConnectionStatusKind.IDLE -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val contentColor = when (kind) {
+        ConnectionStatusKind.LOADING -> MaterialTheme.colorScheme.onPrimaryContainer
+        ConnectionStatusKind.SUCCESS -> MaterialTheme.colorScheme.onSecondaryContainer
+        ConnectionStatusKind.ERROR -> MaterialTheme.colorScheme.onErrorContainer
+        ConnectionStatusKind.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth().testTag("modelConnectionStatus"),
+        shape = MaterialTheme.shapes.medium,
+        color = containerColor,
+        contentColor = contentColor,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            when (kind) {
+                ConnectionStatusKind.LOADING -> CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = contentColor,
+                    strokeWidth = 2.dp,
+                )
+                ConnectionStatusKind.SUCCESS -> Icon(
+                    Icons.Rounded.CheckCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                ConnectionStatusKind.ERROR -> Icon(
+                    Icons.Rounded.ErrorOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                ConnectionStatusKind.IDLE -> Icon(
+                    Icons.Rounded.Info,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(message, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
 internal fun UpdateCheckSetting(
     currentVersionName: String,
     isChecking: Boolean,
     statusMessage: String,
+    updatesSupported: Boolean = true,
     onCheck: () -> Unit,
 ) {
+    val visibleStatus = if (updatesSupported) {
+        statusMessage
+    } else {
+        "Debug 构建使用独立包名，应用内更新仅在正式版启用"
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -803,17 +949,21 @@ internal fun UpdateCheckSetting(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
-            if (statusMessage.isNotBlank()) {
+            if (visibleStatus.isNotBlank()) {
                 Text(
-                    statusMessage,
-                    color = MaterialTheme.colorScheme.primary,
+                    visibleStatus,
+                    color = if (updatesSupported) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
         }
         OutlinedButton(
             onClick = onCheck,
-            enabled = !isChecking,
+            enabled = updatesSupported && !isChecking,
             modifier = Modifier.testTag("checkForUpdateButton"),
         ) {
             if (isChecking) {
@@ -823,7 +973,13 @@ internal fun UpdateCheckSetting(
                 )
                 Spacer(Modifier.width(8.dp))
             }
-            Text(if (isChecking) "检查中" else "检查更新")
+            Text(
+                when {
+                    !updatesSupported -> "仅正式版"
+                    isChecking -> "检查中"
+                    else -> "检查更新"
+                },
+            )
         }
     }
 }
@@ -854,6 +1010,33 @@ internal fun UpdateAvailableDialog(
                 Text(
                     "当前版本 v$currentVersionName。食刻会下载已签名 APK、校验 SHA-256，再交给 Android 系统安装器确认安装。",
                 )
+                if (isDownloading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                val visibleStatus = statusMessage.takeIf {
+                    it.isNotBlank() && it != "发现新版本 v${release.versionName}"
+                }
+                if (visibleStatus != null) {
+                    val failed = visibleStatus.startsWith("下载失败：")
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().testTag("updateStatusMessage"),
+                        shape = MaterialTheme.shapes.medium,
+                        color = if (failed) {
+                            MaterialTheme.colorScheme.errorContainer
+                        } else {
+                            MaterialTheme.colorScheme.primaryContainer
+                        },
+                        contentColor = if (failed) {
+                            MaterialTheme.colorScheme.onErrorContainer
+                        } else {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        },
+                    ) {
+                        Text(
+                            visibleStatus,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
                 Text(
                     "更新内容",
                     fontWeight = FontWeight.SemiBold,
@@ -864,17 +1047,6 @@ internal fun UpdateAvailableDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                if (isDownloading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                if (
-                    statusMessage.isNotBlank() &&
-                    statusMessage != "发现新版本 v${release.versionName}"
-                ) {
-                    Text(
-                        statusMessage,
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
                 Text(
                     "Android 8 或更高版本首次安装时，系统可能要求授权食刻安装未知应用。安装操作始终需要你的确认。",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -965,10 +1137,12 @@ private fun DropdownField(
     options: List<ModelChoice>,
     onSelected: (String) -> Unit,
     placeholder: String = "请选择",
+    modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val selectedLabel = options.find { it.id == selectedId }?.label ?: selectedId.ifBlank { placeholder }
     ExposedDropdownMenuBox(
+        modifier = modifier,
         expanded = expanded,
         onExpandedChange = { if (options.isNotEmpty()) expanded = !expanded },
     ) {

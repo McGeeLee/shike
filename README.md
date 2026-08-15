@@ -23,8 +23,10 @@
 - 识别食物、份量、热量、蛋白质、碳水和脂肪；
 - 按日期查看、补记、删除和撤销删除饮食记录；
 - 设置每日热量目标并查看进度；
-- 支持 Claude、OpenAI、通义千问、智谱 GLM 和自定义 OpenAI 兼容视觉模型；
-- 从 `/v1/models` 自动读取当前 API Key 可用的模型，并可在设置页测试连接；
+- 支持 Claude、OpenAI、Gemini、Kimi、Grok、Mistral、通义千问、智谱 GLM、火山方舟、MiMo、DeepSeek，以及 OpenRouter、硅基流动和自定义兼容接口；
+- 原生协议优先：Claude Messages、OpenAI/xAI/方舟 Responses、Gemini generateContent；其余使用厂商官方兼容协议；
+- 自动读取当前 API Key 可用的模型；Kimi、Grok、Mistral、Gemini 和 OpenRouter 会按官方能力元数据过滤图片模型；
+- 提示词以可见证据、份量依据、项目合计一致性和不可信用户备注隔离为核心，减少臆测与提示词注入；
 - 长按桌面图标可直接“拍照记餐”或打开“模型设置”；
 - 内置完整“食刻”Material 3 品牌色方案，并可在设置中选择是否跟随系统壁纸动态配色（默认关闭）；
 - 每 24 小时自动检查 GitHub 最新稳定版本，支持在 App 内下载、校验并交给系统安装器更新；
@@ -44,7 +46,7 @@ ui/ShikeViewModel.kt           页面状态、异步任务、撤销和日期切�
 data/ShikeRepository.kt        原生本地记录与设置
 data/SecureApiKeyStore.kt      Android Keystore 加密 API Key
 image/ImageProcessor.kt        EXIF 方向修正、图片压缩和缩略图
-network/FoodAnalysisClient.kt  HTTPS 模型发现与视觉识别请求
+network/FoodAnalysisClient.kt  多厂商原生/兼容协议、模型发现与视觉识别请求
 update/AppUpdateClient.kt      GitHub Release 检查、版本比较与自动检查节流
 ```
 
@@ -95,9 +97,9 @@ printf '%s' 'your-key-password' | gh secret set ANDROID_KEY_PASSWORD
 发布时先递增 `versionCode` 和 `versionName`，提交后创建同版本标签并推送：
 
 ```bash
-git tag -a v2.1.0 -m "食刻 2.1.0"
+git tag -a v2.2.0 -m "食刻 2.2.0"
 git push origin main
-git push origin v2.1.0
+git push origin v2.2.0
 ```
 
 不要更换证书或丢失密码；否则已安装版本无法直接升级。若设备从浏览器安装 APK，Android 可能要求用户为该浏览器单独授权“安装未知应用”。
@@ -111,7 +113,7 @@ cd android
 ./gradlew connectedDebugAndroidTest
 ```
 
-单元测试覆盖 HTTPS 地址校验、模型选择、营养汇总和模型列表归一化；Compose UI 测试覆盖首页关键层级、拍照入口和 Material 交互。GitHub Actions 使用不依赖设备的原生验证链路。
+单元测试覆盖 HTTPS 地址校验、协议映射、模型选择、营养汇总、模型列表归一化和提示词边界；Compose UI 测试覆盖首页关键层级、拍照入口和 Material 交互。GitHub Actions 使用不依赖设备的原生验证链路。
 
 迁移依据 [Compose 依赖与编译器配置](https://developer.android.com/develop/ui/compose/setup-compose-dependencies-and-compiler)、[Material 3 Compose](https://developer.android.com/develop/ui/compose/designsystems/material3)、[Android Photo Picker](https://developer.android.com/training/data-storage/shared/photopicker)、[预测性返回](https://developer.android.com/guide/navigation/custom-back/predictive-back-gesture) 和 [Android 网络安全配置](https://developer.android.com/privacy-and-security/security-config)。
 

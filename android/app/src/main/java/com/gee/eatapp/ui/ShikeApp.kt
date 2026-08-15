@@ -105,6 +105,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.gee.eatapp.BuildConfig
 import com.gee.eatapp.data.AppSettings
+import com.gee.eatapp.data.ImageInputSupport
 import com.gee.eatapp.data.MealEntry
 import com.gee.eatapp.data.ProviderCatalog
 import com.gee.eatapp.data.effectiveModel
@@ -669,6 +670,18 @@ private fun SettingsSheet(
                 options = ProviderCatalog.all.map { ModelChoice(it.id, it.name) },
                 onSelected = onProviderSelected,
             )
+            ProviderCatalog.find(draft.providerId)?.let { provider ->
+                Text(
+                    provider.guidance,
+                    modifier = Modifier.padding(top = 6.dp),
+                    color = if (provider.imageInputSupport == ImageInputSupport.UNSUPPORTED) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             Spacer(Modifier.height(14.dp))
             DropdownField(
                 label = if (draft.providerId == "custom") "可用模型" else "模型",

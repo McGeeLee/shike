@@ -13,6 +13,7 @@ import com.gee.eatapp.data.AppSettings
 import com.gee.eatapp.data.Confidence
 import com.gee.eatapp.data.DailySummary
 import com.gee.eatapp.data.DeletedMeal
+import com.gee.eatapp.data.ImageInputSupport
 import com.gee.eatapp.data.MealEntry
 import com.gee.eatapp.data.ProviderCatalog
 import com.gee.eatapp.data.ShikeRepository
@@ -401,6 +402,7 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
                 .onSuccess { models ->
                     val current = uiState.settingsDraft ?: return@onSuccess
                     if (current.providerId != draft.providerId) return@onSuccess
+                    val provider = ProviderCatalog.find(current.providerId) ?: return@onSuccess
                     val selected = current.selectedModel.takeIf(models::contains) ?: models.first()
                     uiState = uiState.copy(
                         settingsDraft = current.copy(
@@ -409,7 +411,11 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
                             discoveredModels = current.discoveredModels + (current.providerId to models),
                             isLoading = false,
                             statusKind = ConnectionStatusKind.SUCCESS,
-                            statusMessage = "${if (connectionTest) "连接成功" else "获取成功"}，发现 ${models.size} 个模型。请选择支持图片输入的模型。",
+                            statusMessage = if (provider.imageInputSupport == ImageInputSupport.UNSUPPORTED) {
+                                "连接成功，发现 ${models.size} 个模型；但这些模型当前不能接收食物照片。"
+                            } else {
+                                "${if (connectionTest) "连接成功" else "获取成功"}，发现 ${models.size} 个可选模型。"
+                            },
                         ),
                     )
                 }
@@ -436,6 +442,11 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
                 ?: throw IllegalArgumentException("每日目标需在 1 到 100000 千卡之间")
             if (draft.selectedModel.isBlank()) {
                 throw IllegalArgumentException("请先获取并选择一个支持图片的模型")
+            }
+            val provider = ProviderCatalog.find(draft.providerId)
+                ?: throw IllegalArgumentException("请选择有效的模型服务商")
+            if (provider.imageInputSupport == ImageInputSupport.UNSUPPORTED) {
+                throw IllegalArgumentException(provider.guidance)
             }
             val settings = draft.toSettings().let {
                 if (it.providerId == "custom") it.copy(customBaseUrl = normalizeBaseUrl(it.customBaseUrl)) else it

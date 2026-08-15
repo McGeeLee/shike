@@ -3,6 +3,7 @@ package com.gee.eatapp.data
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppModelsTest {
@@ -47,5 +48,20 @@ class AppModelsTest {
             listOf("gpt-4o", "gpt-5.1"),
             normalizeModelIds(listOf(" gpt-5.1 ", "gpt-4o", "gpt-5.1", "\u0000")),
         )
+    }
+
+    @Test
+    fun providerCatalogCoversNativeAndCompatibleProtocols() {
+        val expected = setOf(
+            "claude", "openai", "gemini", "kimi", "xai", "mistral", "qwen", "zhipu",
+            "volcengine", "mimo", "deepseek", "openrouter", "siliconflow", "custom",
+        )
+        assertEquals(expected, ProviderCatalog.all.map { it.id }.toSet())
+        assertEquals(ApiProtocol.ANTHROPIC_MESSAGES, ProviderCatalog.find("claude")?.protocol)
+        assertEquals(ApiProtocol.GEMINI_GENERATE_CONTENT, ProviderCatalog.find("gemini")?.protocol)
+        assertEquals(ApiProtocol.OPENAI_RESPONSES, ProviderCatalog.find("xai")?.protocol)
+        assertEquals("language-models", ProviderCatalog.find("xai")?.modelListPath)
+        assertEquals(ImageInputSupport.UNSUPPORTED, ProviderCatalog.find("deepseek")?.imageInputSupport)
+        assertTrue(ProviderCatalog.find("openrouter")?.modelListPath?.contains("input_modalities=image") == true)
     }
 }

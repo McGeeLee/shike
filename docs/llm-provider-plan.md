@@ -9,6 +9,7 @@
 3. 模型列表存在视觉能力元数据时，只向用户展示支持图片输入的模型；缺少元数据时给出明确选择提示。
 4. API Key 继续由 Android Keystore 加密保存，图片只直传用户选择的服务商。
 5. 任何纯文本模型都不能被误保存为食物照片识别引擎。
+6. 所有服务商的模型下拉列表只使用模型 API 的实时响应，不提供本地静态备选列表。
 
 ## 2.2.0 范围
 
@@ -26,7 +27,7 @@
 | 智谱 GLM | 官方兼容入口 | `/v4/models` | 提示选择 GLM-4V 等视觉模型 | 已接入 |
 | OpenRouter | 官方聚合兼容入口 | 带 image/text 模态筛选的 Models API | 二次校验模型元数据 | 已接入 |
 | 硅基流动 | 官方聚合兼容入口 | `/v1/models` | 提示选择模型广场中的 VLM | 已接入 |
-| DeepSeek | 官方 Chat Completions | `/models` | V4 当前纯文本；允许测连接，禁止保存为照片引擎 | 已接入协议并加能力保护 |
+| DeepSeek | 官方 Chat Completions | `/models` 动态获取并筛选 `deepseek-v4-flash-vision-exp` | Base64 `image_url` 高细节输入 | 已接入视觉与 JSON Output |
 | 自定义服务 | OpenAI Chat Completions | 自定义 `/models` | 用户负责选择支持 `image_url` 的模型 | 已保留 |
 
 ## 提示词与结果质量
@@ -42,7 +43,7 @@
 
 - 单元测试：厂商目录、协议映射、默认模型、URL 规范化、提示词隔离与长度边界。
 - 构建验证：Debug/Release 编译、R8、Lint、Compose AndroidTest 源码编译。
-- 设备验证：设置页遍历服务商、动态模型列表、DeepSeek 能力拦截、拍照识别主流程、预测性返回。
+- 设备验证：设置页遍历服务商、动态模型列表、DeepSeek 视觉识别、拍照识别主流程、预测性返回。
 - 发布验证：同证书签名、APK 签名校验、SHA-256、GitHub Release 和 App 内更新日志展示。
 
 ## 企业云下一阶段

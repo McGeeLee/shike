@@ -17,6 +17,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import com.gee.eatapp.data.DailyNutritionPoint
+import com.gee.eatapp.data.DailySummary
 import com.gee.eatapp.update.AppRelease
 import com.gee.eatapp.ui.theme.ShikeLightColorScheme
 import com.gee.eatapp.ui.theme.ShikeTheme
@@ -24,6 +26,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import java.time.LocalDate
 
 class ShikeHomeScreenTest {
     @get:Rule
@@ -49,9 +52,52 @@ class ShikeHomeScreenTest {
 
         composeRule.onNodeWithText("食刻").assertIsDisplayed()
         composeRule.onNodeWithTag("summaryCard").assertIsDisplayed()
+        composeRule.onNodeWithTag("dailyNutritionPanel").assertIsDisplayed()
+        composeRule.onNodeWithText("营养面板").assertIsDisplayed()
         composeRule.onNodeWithText("今日记录").assertIsDisplayed()
         composeRule.onNodeWithTag("captureButton").performClick()
         composeRule.runOnIdle { assertTrue(captureClicked) }
+    }
+
+    @Test
+    fun statisticsViewShowsTrendAndAverageNutrition() {
+        val today = LocalDate.now()
+        val history = (6 downTo 0).map { offset ->
+            DailyNutritionPoint(
+                date = today.minusDays(offset.toLong()),
+                mealCount = if (offset < 3) 2 else 0,
+                summary = if (offset < 3) {
+                    DailySummary(1200 + offset * 100, 60.0, 140.0, 35.0)
+                } else {
+                    DailySummary(0, 0.0, 0.0, 0.0)
+                },
+            )
+        }
+        composeRule.setContent {
+            ShikeTheme {
+                ShikeHomeScreen(
+                    state = ShikeUiState(nutritionHistory = history),
+                    snackbarHostState = remember { SnackbarHostState() },
+                    onPreviousDay = {},
+                    onNextDay = {},
+                    onToday = {},
+                    onOpenSettings = {},
+                    onAddMeal = {},
+                    onDeleteMeal = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("statisticsTab").performClick()
+        composeRule.onNodeWithTag("statisticsView").assertIsDisplayed()
+        composeRule.onNodeWithTag("statisticsOverviewCard").assertIsDisplayed()
+        composeRule.onNodeWithTag("calorieTrendCard").assertIsDisplayed()
+        composeRule.onNodeWithTag("statisticsNutritionPanel").assertIsDisplayed()
+        composeRule.onNodeWithText("摄入统计").assertIsDisplayed()
+        composeRule.onNodeWithText("3/7").assertIsDisplayed()
+        composeRule.onNodeWithText("6").assertIsDisplayed()
+        composeRule.onNodeWithTag("thirtyDayPeriod").performClick()
+        composeRule.onNodeWithText("近 30 天每日平均").assertIsDisplayed()
     }
 
     @Test

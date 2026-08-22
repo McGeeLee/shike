@@ -17,6 +17,9 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      SHIKE_VERSION_NAME: "0.0.${{ github.run_number }}"
+      SHIKE_VERSION_CODE: "${{ github.run_number }}"
     steps:
       - name: Check out source
         uses: actions/checkout@v5

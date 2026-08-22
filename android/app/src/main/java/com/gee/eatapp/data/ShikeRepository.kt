@@ -61,6 +61,19 @@ class ShikeRepository(context: Context) {
         preferences.edit { putString(entriesKey(date), array.toString()) }
     }
 
+    fun nutritionHistory(endDate: LocalDate, days: Int): List<DailyNutritionPoint> {
+        val dayCount = days.coerceIn(1, MAX_HISTORY_DAYS)
+        return (dayCount - 1 downTo 0).map { offset ->
+            val date = endDate.minusDays(offset.toLong())
+            val entries = entries(date)
+            DailyNutritionPoint(
+                date = date,
+                mealCount = entries.size,
+                summary = DailySummary.from(entries),
+            )
+        }
+    }
+
     fun legacyMigrationComplete(): Boolean = preferences.getBoolean(KEY_LEGACY_MIGRATED, false)
 
     fun importLegacyData(raw: String): Int {
@@ -143,6 +156,7 @@ class ShikeRepository(context: Context) {
     companion object {
         const val DEFAULT_GOAL = 2000
         const val MAX_GOAL = 100_000
+        const val MAX_HISTORY_DAYS = 30
         private const val MAX_THUMBNAIL_CHARS = 256_000
         private const val KEY_SETTINGS = "settings"
         private const val KEY_GOAL = "goal"

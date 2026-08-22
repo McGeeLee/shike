@@ -4,6 +4,7 @@ import com.gee.eatapp.data.AnalysisResult
 import com.gee.eatapp.data.ApiProtocol
 import com.gee.eatapp.data.AppSettings
 import com.gee.eatapp.data.Confidence
+import com.gee.eatapp.data.DEEPSEEK_VISION_MODEL
 import com.gee.eatapp.data.FoodItem
 import com.gee.eatapp.data.ImageInputSupport
 import com.gee.eatapp.data.ProviderCatalog
@@ -68,14 +69,17 @@ class FoodAnalysisClient {
                 }
             }
             val normalized = normalizeModelIds(values)
-            val selectable = if (provider.id == "mimo") {
-                normalized.filter { it.equals("mimo-v2.5", ignoreCase = true) }
-            } else {
-                normalized
+            val selectable = when (provider.id) {
+                "mimo" -> normalized.filter { it.equals("mimo-v2.5", ignoreCase = true) }
+                "deepseek" -> normalized.filter { it.equals(DEEPSEEK_VISION_MODEL, ignoreCase = true) }
+                else -> normalized
             }
             selectable.ifEmpty {
                 if (provider.id == "mimo" && normalized.isNotEmpty()) {
                     throw IllegalStateException("连接成功，但未发现当前支持图片输入的 MiMo-V2.5 模型")
+                }
+                if (provider.id == "deepseek" && normalized.isNotEmpty()) {
+                    throw IllegalStateException("连接成功，但未发现 DeepSeek V4 Flash Vision Exp 视觉模型")
                 }
                 throw IllegalStateException("连接成功，但该 API Key 没有返回可用模型")
             }
@@ -122,6 +126,7 @@ class FoodAnalysisClient {
                 apiKey.trim(),
                 imageBase64,
                 userText,
+                deepSeekVision = provider.id == "deepseek",
             )
             ApiProtocol.GEMINI_GENERATE_CONTENT -> requestGemini(
                 baseUrl,
@@ -339,7 +344,11 @@ class FoodAnalysisClient {
         apiKey: String,
         imageBase64: String,
         userText: String,
+        deepSeekVision: Boolean,
     ): HttpResponse {
+        val imageUrl = JSONObject()
+            .put("url", "data:image/jpeg;base64,$imageBase64")
+        if (deepSeekVision) imageUrl.put("detail", "high")
         val body = JSONObject()
             .put("model", model)
             .put(
@@ -362,11 +371,7 @@ class FoodAnalysisClient {
                                     .put(
                                         JSONObject()
                                             .put("type", "image_url")
-                                            .put(
-                                                "image_url",
-                                                JSONObject()
-                                                    .put("url", "data:image/jpeg;base64,$imageBase64"),
-                                            ),
+                                            .put("image_url", imageUrl),
                                     )
                                     .put(
                                         JSONObject()
@@ -376,6 +381,11 @@ class FoodAnalysisClient {
                             ),
                     ),
             )
+        if (deepSeekVision) {
+            body
+                .put("max_tokens", 2048)
+                .put("response_format", JSONObject().put("type", "json_object"))
+        }
         return request(
             "$baseUrl/chat/completions",
             "POST",

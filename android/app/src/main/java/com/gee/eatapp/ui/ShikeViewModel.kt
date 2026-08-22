@@ -12,6 +12,7 @@ import com.gee.eatapp.data.AnalysisResult
 import com.gee.eatapp.data.AppSettings
 import com.gee.eatapp.data.Confidence
 import com.gee.eatapp.data.DailySummary
+import com.gee.eatapp.data.DailyNutritionPoint
 import com.gee.eatapp.data.DeletedMeal
 import com.gee.eatapp.data.ImageInputSupport
 import com.gee.eatapp.data.MealEntry
@@ -64,6 +65,7 @@ sealed interface MealPanel {
 data class ShikeUiState(
     val selectedDate: LocalDate = LocalDate.now(),
     val entries: List<MealEntry> = emptyList(),
+    val nutritionHistory: List<DailyNutritionPoint> = emptyList(),
     val settings: AppSettings = AppSettings(),
     val goal: Int = ShikeRepository.DEFAULT_GOAL,
     val settingsDraft: SettingsDraft? = null,
@@ -186,7 +188,11 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
         )
         val entries = uiState.entries + entry
         repository.saveEntries(uiState.selectedDate, entries)
-        uiState = uiState.copy(entries = entries, mealPanel = MealPanel.Hidden)
+        uiState = uiState.copy(
+            entries = entries,
+            nutritionHistory = updatedNutritionHistory(uiState.selectedDate, entries),
+            mealPanel = MealPanel.Hidden,
+        )
     }
 
     fun dismissMealPanel() {
@@ -202,6 +208,7 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
         repository.saveEntries(uiState.selectedDate, entries)
         uiState = uiState.copy(
             entries = entries,
+            nutritionHistory = updatedNutritionHistory(uiState.selectedDate, entries),
             deletedMeal = DeletedMeal(++eventCounter, uiState.selectedDate, entry, index),
         )
     }
@@ -213,6 +220,7 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
         repository.saveEntries(deleted.date, entries)
         uiState = uiState.copy(
             entries = if (deleted.date == uiState.selectedDate) entries else uiState.entries,
+            nutritionHistory = updatedNutritionHistory(deleted.date, entries),
             deletedMeal = null,
         )
     }
@@ -243,11 +251,10 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectProvider(providerId: String) {
         val draft = uiState.settingsDraft ?: return
-        val provider = ProviderCatalog.find(providerId) ?: return
+        if (ProviderCatalog.find(providerId) == null) return
         val selections = draft.selections + (draft.providerId to draft.selectedModel)
         val selected = selections[providerId]
             ?: draft.discoveredModels[providerId]?.firstOrNull()
-            ?: provider.models.firstOrNull()?.id
             ?: ""
         uiState = uiState.copy(
             settingsDraft = draft.copy(
@@ -474,14 +481,7 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun availableModels(draft: SettingsDraft): List<ModelChoice> {
         val provider = ProviderCatalog.find(draft.providerId) ?: return emptyList()
-        val discovered = draft.discoveredModels[provider.id]
-        val ids = discovered ?: if (provider.id == "custom") {
-            listOfNotNull(draft.selectedModel.takeIf(String::isNotBlank))
-        } else {
-            provider.models.map { it.id }
-        }
-        val labels = provider.models.associate { it.id to it.label }
-        return ids.map { ModelChoice(it, labels[it] ?: it) }
+        return draft.discoveredModels[provider.id].orEmpty().map { ModelChoice(it, it) }
     }
 
     fun legacyMigrationNeeded(): Boolean = !repository.legacyMigrationComplete()
@@ -507,9 +507,19 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
     private fun loadState(date: LocalDate) = ShikeUiState(
         selectedDate = date,
         entries = repository.entries(date),
+        nutritionHistory = repository.nutritionHistory(LocalDate.now(), ShikeRepository.MAX_HISTORY_DAYS),
         settings = repository.settings(),
         goal = repository.goal(),
     )
+
+    private fun updatedNutritionHistory(date: LocalDate, entries: List<MealEntry>) =
+        uiState.nutritionHistory.map { point ->
+            if (point.date == date) {
+                point.copy(mealCount = entries.size, summary = DailySummary.from(entries))
+            } else {
+                point
+            }
+        }
 
     private fun updateDraft(block: (SettingsDraft) -> SettingsDraft) {
         val draft = uiState.settingsDraft ?: return

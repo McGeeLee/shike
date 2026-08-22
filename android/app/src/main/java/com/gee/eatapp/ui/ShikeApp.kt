@@ -40,6 +40,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronLeft
@@ -53,6 +54,7 @@ import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
@@ -76,6 +78,9 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -95,6 +100,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -116,8 +122,12 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.gee.eatapp.BuildConfig
 import com.gee.eatapp.data.AppSettings
+import com.gee.eatapp.data.DailyNutritionPoint
+import com.gee.eatapp.data.DailySummary
 import com.gee.eatapp.data.ImageInputSupport
+import com.gee.eatapp.data.MacroEnergyDistribution
 import com.gee.eatapp.data.MealEntry
+import com.gee.eatapp.data.NutritionStatistics
 import com.gee.eatapp.data.ProviderCatalog
 import com.gee.eatapp.data.effectiveModel
 import com.gee.eatapp.data.simplifiedChinese
@@ -299,6 +309,10 @@ fun ShikeHomeScreen(
     onAddMeal: () -> Unit,
     onDeleteMeal: (Int) -> Unit,
 ) {
+    var selectedSectionName by rememberSaveable { mutableStateOf(HomeSection.RECORDS.name) }
+    val selectedSection = HomeSection.entries.firstOrNull { it.name == selectedSectionName }
+        ?: HomeSection.RECORDS
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background,
@@ -307,9 +321,9 @@ fun ShikeHomeScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
                 .padding(scaffoldPadding)
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .background(MaterialTheme.colorScheme.background),
+                .windowInsetsPadding(WindowInsets.safeDrawing),
             contentAlignment = Alignment.TopCenter,
         ) {
             Column(
@@ -325,37 +339,193 @@ fun ShikeHomeScreen(
                     ),
             ) {
                 AppHeader(onOpenSettings)
-                DateNavigator(state.selectedDate, onPreviousDay, onNextDay, onToday)
-                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                    if (maxWidth >= ShikeDimensions.WideBreakpoint) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(24.dp),
-                            verticalAlignment = Alignment.Top,
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(0.9f),
-                                verticalArrangement = Arrangement.spacedBy(ShikeDimensions.SectionGap),
-                            ) {
-                                SummaryCard(state, onOpenSettings)
-                                CaptureButton(state.selectedDate == LocalDate.now(), onAddMeal)
-                                ModelLabel(state.settings)
-                            }
-                            EntryCard(
-                                date = state.selectedDate,
-                                entries = state.entries,
-                                onDeleteMeal = onDeleteMeal,
-                                modifier = Modifier.weight(1.1f),
-                            )
-                        }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(ShikeDimensions.SectionGap)) {
-                            SummaryCard(state, onOpenSettings)
-                            CaptureButton(state.selectedDate == LocalDate.now(), onAddMeal)
-                            ModelLabel(state.settings)
-                            EntryCard(state.selectedDate, state.entries, onDeleteMeal)
-                        }
-                    }
+                HomeSectionSwitcher(
+                    selected = selectedSection,
+                    onSelected = { selectedSectionName = it.name },
+                )
+                Spacer(Modifier.height(12.dp))
+                when (selectedSection) {
+                    HomeSection.RECORDS -> RecordView(
+                        state = state,
+                        onPreviousDay = onPreviousDay,
+                        onNextDay = onNextDay,
+                        onToday = onToday,
+                        onOpenSettings = onOpenSettings,
+                        onAddMeal = onAddMeal,
+                        onDeleteMeal = onDeleteMeal,
+                    )
+                    HomeSection.STATISTICS -> StatisticsView(
+                        history = state.nutritionHistory,
+                        goal = state.goal,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private enum class HomeSection(val label: String) {
+    RECORDS("记录"),
+    STATISTICS("统计"),
+}
+
+private enum class StatisticsPeriod(val label: String, val days: Int) {
+    WEEK("近 7 天", 7),
+    MONTH("近 30 天", 30),
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HomeSectionSwitcher(
+    selected: HomeSection,
+    onSelected: (HomeSection) -> Unit,
+) {
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier.fillMaxWidth().testTag("homeSectionSwitcher"),
+    ) {
+        HomeSection.entries.forEachIndexed { index, section ->
+            SegmentedButton(
+                selected = selected == section,
+                onClick = { onSelected(section) },
+                shape = SegmentedButtonDefaults.itemShape(index, HomeSection.entries.size),
+                modifier = Modifier.testTag(
+                    if (section == HomeSection.RECORDS) "recordsTab" else "statisticsTab",
+                ),
+                icon = {
+                    Icon(
+                        imageVector = if (section == HomeSection.RECORDS) {
+                            Icons.Rounded.Restaurant
+                        } else {
+                            Icons.Rounded.BarChart
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+                label = { Text(section.label) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun RecordView(
+    state: ShikeUiState,
+    onPreviousDay: () -> Unit,
+    onNextDay: () -> Unit,
+    onToday: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onAddMeal: () -> Unit,
+    onDeleteMeal: (Int) -> Unit,
+) {
+    DateNavigator(state.selectedDate, onPreviousDay, onNextDay, onToday)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth >= ShikeDimensions.WideBreakpoint) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(
+                    modifier = Modifier.weight(0.9f),
+                    verticalArrangement = Arrangement.spacedBy(ShikeDimensions.SectionGap),
+                ) {
+                    SummaryCard(state, onOpenSettings)
+                    CaptureButton(state.selectedDate == LocalDate.now(), onAddMeal)
+                    NutritionPanel(
+                        summary = state.summary,
+                        title = "营养面板",
+                        subtitle = "当日宏量营养结构",
+                        modifier = Modifier.testTag("dailyNutritionPanel"),
+                    )
+                    ModelLabel(state.settings)
+                }
+                EntryCard(
+                    date = state.selectedDate,
+                    entries = state.entries,
+                    onDeleteMeal = onDeleteMeal,
+                    modifier = Modifier.weight(1.1f),
+                )
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(ShikeDimensions.SectionGap)) {
+                SummaryCard(state, onOpenSettings)
+                CaptureButton(state.selectedDate == LocalDate.now(), onAddMeal)
+                NutritionPanel(
+                    summary = state.summary,
+                    title = "营养面板",
+                    subtitle = "当日宏量营养结构",
+                    modifier = Modifier.testTag("dailyNutritionPanel"),
+                )
+                ModelLabel(state.settings)
+                EntryCard(state.selectedDate, state.entries, onDeleteMeal)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StatisticsView(
+    history: List<DailyNutritionPoint>,
+    goal: Int,
+) {
+    var selectedPeriodName by rememberSaveable { mutableStateOf(StatisticsPeriod.WEEK.name) }
+    val selectedPeriod = StatisticsPeriod.entries.firstOrNull { it.name == selectedPeriodName }
+        ?: StatisticsPeriod.WEEK
+    val points = remember(history, selectedPeriod) { history.takeLast(selectedPeriod.days) }
+    val statistics = remember(points) { NutritionStatistics.from(points) }
+
+    Column(
+        modifier = Modifier.fillMaxWidth().testTag("statisticsView"),
+        verticalArrangement = Arrangement.spacedBy(ShikeDimensions.SectionGap),
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            Text("摄入统计", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "从每日餐食记录汇总",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(12.dp))
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                StatisticsPeriod.entries.forEachIndexed { index, period ->
+                    SegmentedButton(
+                        selected = period == selectedPeriod,
+                        onClick = { selectedPeriodName = period.name },
+                        shape = SegmentedButtonDefaults.itemShape(index, StatisticsPeriod.entries.size),
+                        modifier = Modifier.testTag(if (period.days == 7) "sevenDayPeriod" else "thirtyDayPeriod"),
+                        icon = {},
+                        label = { Text(period.label) },
+                    )
+                }
+            }
+        }
+        StatisticsOverviewCard(statistics)
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            if (maxWidth >= ShikeDimensions.WideBreakpoint) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(24.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    CalorieTrendCard(points, selectedPeriod, goal, Modifier.weight(1.1f))
+                    NutritionPanel(
+                        summary = statistics.dailyAverage,
+                        title = "日均营养",
+                        subtitle = "${selectedPeriod.label}每日平均",
+                        modifier = Modifier.weight(0.9f).testTag("statisticsNutritionPanel"),
+                    )
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(ShikeDimensions.SectionGap)) {
+                    CalorieTrendCard(points, selectedPeriod, goal)
+                    NutritionPanel(
+                        summary = statistics.dailyAverage,
+                        title = "日均营养",
+                        subtitle = "${selectedPeriod.label}每日平均",
+                        modifier = Modifier.testTag("statisticsNutritionPanel"),
+                    )
                 }
             }
         }
@@ -373,6 +543,270 @@ private fun AppHeader(onOpenSettings: () -> Unit) {
         IconButton(onClick = onOpenSettings, modifier = Modifier.size(ShikeDimensions.TouchTarget)) {
             Icon(Icons.Rounded.Settings, contentDescription = "打开设置")
         }
+    }
+}
+
+@Composable
+private fun StatisticsOverviewCard(statistics: NutritionStatistics) {
+    Card(
+        modifier = Modifier.fillMaxWidth().testTag("statisticsOverviewCard"),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+    ) {
+        Column(Modifier.padding(ShikeDimensions.CardPadding)) {
+            Text(
+                "这段时间",
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                StatisticMetric(
+                    value = statistics.dailyAverage.calories.toString(),
+                    label = "日均千卡",
+                    modifier = Modifier.weight(1f),
+                )
+                StatisticMetric(
+                    value = "${statistics.recordedDays}/${statistics.dayCount}",
+                    label = "记录天数",
+                    modifier = Modifier.weight(1f),
+                )
+                StatisticMetric(
+                    value = statistics.mealCount.toString(),
+                    label = "餐次",
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatisticMetric(value: String, label: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            value,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            fontSize = 23.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+        Text(
+            label,
+            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f),
+            style = MaterialTheme.typography.labelMedium,
+        )
+    }
+}
+
+private data class TrendBar(val label: String, val calories: Int)
+
+@Composable
+private fun CalorieTrendCard(
+    points: List<DailyNutritionPoint>,
+    period: StatisticsPeriod,
+    goal: Int,
+    modifier: Modifier = Modifier,
+) {
+    val bars = remember(points, period) { buildTrendBars(points, period) }
+    val chartMax = maxOf(goal, bars.maxOfOrNull { it.calories } ?: 0, 1)
+    Card(
+        modifier = modifier.fillMaxWidth().testTag("calorieTrendCard"),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(Modifier.padding(ShikeDimensions.CardPadding)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column {
+                    Text("热量趋势", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (period.days == 7) "每日摄入" else "每 5 天的日均摄入",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text(
+                    "目标 $goal",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+            if (bars.none { it.calories > 0 }) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(170.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "还没有可展示的餐食记录",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(176.dp).padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    bars.forEach { bar ->
+                        Column(
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Bottom,
+                        ) {
+                            Text(
+                                if (bar.calories > 0) bar.calories.toString() else "–",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                            )
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(112.dp),
+                                contentAlignment = Alignment.BottomCenter,
+                            ) {
+                                val height = if (bar.calories == 0) {
+                                    3.dp
+                                } else {
+                                    (bar.calories.toFloat() / chartMax * 108f).coerceAtLeast(8f).dp
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.58f)
+                                        .height(height)
+                                        .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                                        .background(
+                                            if (bar.calories > goal) {
+                                                MaterialTheme.colorScheme.error
+                                            } else {
+                                                MaterialTheme.colorScheme.primary
+                                            },
+                                        ),
+                                )
+                            }
+                            Text(
+                                bar.label,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun buildTrendBars(
+    points: List<DailyNutritionPoint>,
+    period: StatisticsPeriod,
+): List<TrendBar> = if (period.days == 7) {
+    points.map { point ->
+        TrendBar(
+            label = point.date.format(DateTimeFormatter.ofPattern("E", simplifiedChinese)),
+            calories = point.summary.calories,
+        )
+    }
+} else {
+    points.chunked(5).map { group ->
+        TrendBar(
+            label = group.last().date.format(DateTimeFormatter.ofPattern("M/d", simplifiedChinese)),
+            calories = group.map { it.summary.calories }.average().roundToInt(),
+        )
+    }
+}
+
+@Composable
+private fun NutritionPanel(
+    summary: DailySummary,
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+) {
+    val energy = remember(summary) { MacroEnergyDistribution.from(summary) }
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Column(Modifier.padding(ShikeDimensions.CardPadding)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                subtitle,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(16.dp))
+            NutrientProgressRow(
+                label = "蛋白质",
+                grams = summary.proteinGrams,
+                share = energy.shareOf(energy.proteinCalories),
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.height(13.dp))
+            NutrientProgressRow(
+                label = "碳水",
+                grams = summary.carbsGrams,
+                share = energy.shareOf(energy.carbsCalories),
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+            Spacer(Modifier.height(13.dp))
+            NutrientProgressRow(
+                label = "脂肪",
+                grams = summary.fatGrams,
+                share = energy.shareOf(energy.fatCalories),
+                color = MaterialTheme.colorScheme.secondary,
+            )
+            Text(
+                "占比按蛋白质 4、碳水 4、脂肪 9 千卡/克估算",
+                modifier = Modifier.padding(top = 14.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun NutrientProgressRow(
+    label: String,
+    grams: Double,
+    share: Float,
+    color: Color,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "${formatNumber(grams)}g · ${(share * 100).roundToInt()}%",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        LinearProgressIndicator(
+            progress = { share },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp)
+                .height(7.dp)
+                .clip(RoundedCornerShape(4.dp)),
+            color = color,
+            trackColor = color.copy(alpha = 0.14f),
+            gapSize = 0.dp,
+            drawStopIndicator = {},
+        )
     }
 }
 
@@ -472,29 +906,7 @@ private fun SummaryCard(state: ShikeUiState, onOpenSettings: () -> Unit) {
                 gapSize = 0.dp,
                 drawStopIndicator = {},
             )
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(ShikeDimensions.SmallGap),
-            ) {
-                MacroBox("蛋白质", summary.proteinGrams, Modifier.weight(1f))
-                MacroBox("碳水", summary.carbsGrams, Modifier.weight(1f))
-                MacroBox("脂肪", summary.fatGrams, Modifier.weight(1f))
-            }
         }
-    }
-}
-
-@Composable
-private fun MacroBox(label: String, grams: Double, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .clip(MaterialTheme.shapes.small)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
-        Text("${grams.roundToInt()}g", fontWeight = FontWeight.Bold, fontSize = 16.sp)
     }
 }
 
@@ -710,13 +1122,11 @@ internal fun SettingsSheet(
                 placeholder = "请先自动获取模型",
                 modifier = Modifier.testTag("modelField"),
             )
-            if (draft.providerId == "custom") {
-                Text(
-                    "模型直接从接口的 /v1/models 读取，不需要手填或猜测。",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
+            Text(
+                "模型列表通过当前服务商的 API 实时获取，不使用本地预置列表。",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
             Spacer(Modifier.height(14.dp))
             OutlinedTextField(
                 value = draft.goalInput,

@@ -19,6 +19,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
+        super.onCreate(savedInstanceState)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.light(0x00000000, 0x00000000),
             navigationBarStyle = SystemBarStyle.light(0x00000000, 0x00000000),
@@ -26,7 +27,6 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = false
         }
-        super.onCreate(savedInstanceState)
         setContent {
             ShikeTheme(dynamicColor = viewModel.uiState.settings.dynamicColorEnabled) {
                 ShikeApp(viewModel)

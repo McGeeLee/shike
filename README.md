@@ -102,6 +102,20 @@ cd shike/android
 
 用 Android Studio 打开 `android/`，连接设备或启动模拟器后运行。首次使用时按“模型配置”章节获取并选择模型。
 
+## 项目网站与 Cloudflare Pages
+
+独立项目页位于 `site/`，不会参与 Android 应用构建。绑定本 GitHub 仓库到 Cloudflare Pages 时使用以下设置：
+
+| 设置 | 值 |
+| --- | --- |
+| Production branch | `main` |
+| Root directory | `site` |
+| Build command | `npm run build:pages` |
+| Build output directory | `out` |
+| Node.js | `22` |
+
+本地预览可在 `site/` 目录运行 `npm run dev`；提交前用 `npm run build:pages` 验证 Pages 的纯静态产物。
+
 如需在本地验证签名构建，将 `android/release-signing.properties.example` 复制为 `android/release-signing.properties`，按示例路径准备签名证书和密码文件，再运行 `./gradlew assembleRelease`。签名材料已被 Git 忽略；正式发行由 GitHub CD 使用仓库 Secrets 完成，升级同一个 App 必须持续使用同一证书。
 
 ## 自动更新与 CI/CD

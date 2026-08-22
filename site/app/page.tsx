@@ -1,56 +1,60 @@
 import { ShikeDemo } from './shike-demo';
-import { SiteControls } from './site-controls';
+import { SiteHeader } from './site-controls';
 
-const version = '2.3.1';
+const pageUrl = 'https://shike.mcgeelee.com/';
+const portfolioUrl = 'https://mcgeelee.com/';
 const repositoryUrl = 'https://github.com/McGeeLee/shike';
-const releaseUrl = `${repositoryUrl}/releases/download/v${version}/shike-v${version}.apk`;
+const releaseUrl =
+  'https://raw.githubusercontent.com/McGeeLee/mcgeelee-portfolio/main/public/downloads/shike-v1.0.0.apk';
 
-const softwareSchema = {
+const structuredData = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
+  '@id': `${pageUrl}#app`,
   name: '食刻 Shike',
-  description:
-    '通过视觉模型识别食物、估算热量与三大营养素，并在本地保存记录的 Android 应用。',
+  url: pageUrl,
+  description: '通过视觉模型识别食物、估算热量与三大营养素，并在本地保存记录的 Android 应用。',
   applicationCategory: 'HealthApplication',
   operatingSystem: 'Android',
   downloadUrl: releaseUrl,
-  softwareVersion: version,
   codeRepository: repositoryUrl,
   author: {
     '@type': 'Person',
     name: 'McGee Lee',
-    url: 'https://github.com/McGeeLee',
+    url: portfolioUrl,
   },
 };
 
 export default function Home() {
   return (
-    <main className="projectDetail projectDetailShike">
-      <SiteControls />
+    <main className="projectDetail projectDetail-shike">
+      <SiteHeader />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareSchema) }}
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(structuredData).replace(/</g, '\\u003c'),
+        }}
       />
 
-      <nav id="top" className="projectDetailNav" aria-label="项目页导航">
-        <a href={repositoryUrl}>← 项目仓库</a>
-        <span>ANDROID / AI NUTRITION TRACKER</span>
+      <nav className="projectDetailNav" aria-label="项目页导航">
+        <a href={portfolioUrl}>← 返回所有作品</a>
+        <span>WORK 01 / DAILY PRODUCT</span>
       </nav>
 
       <section className="projectDetailHero" aria-labelledby="project-title">
         <article className="projectDetailHeroCopy">
-          <span className="sectionCode">ANDROID / DAILY PRODUCT</span>
+          <span className="sectionCode">WORK 01 / DAILY PRODUCT</span>
           <h1 id="project-title"><span>食刻</span><span>Shike</span></h1>
-          <p className="projectDetailKicker">拍一张，记一餐。</p>
+          <p className="projectDetailKicker">拍张照片，记下这一餐。</p>
           <p className="projectDetailDescription">
             一款从真实记录需求出发的 Android 饮食应用。它把拍照、视觉识别、营养估算和当天记录连成一个足够轻的日常动作。
           </p>
           <ul className="projectDetailTags" aria-label="项目技术与特性">
-            <li>视觉模型</li><li>原生 Android</li><li>本地保存</li><li>隐私优先</li>
+            <li>视觉模型</li><li>Android App</li><li>本地保存</li><li>图片压缩</li>
           </ul>
           <div className="projectDetailActions">
-            <a className="actionLink actionLinkPrimary" href={releaseUrl}>
-              下载正式版 {version} <span aria-hidden="true">↓</span>
+            <a className="actionLink actionLinkPrimary" href={releaseUrl} download="shike-v1.0.0.apk">
+              下载正式版 1.0.0 <span aria-hidden="true">↓</span>
             </a>
             <a className="actionLink actionLinkSecondary" href={repositoryUrl} target="_blank" rel="noreferrer">
               查看源码 <span aria-hidden="true">↗</span>
@@ -58,7 +62,7 @@ export default function Home() {
           </div>
         </article>
 
-        <div className="projectDetailVisual" aria-label="食刻应用首页交互预览">
+        <div className="projectDetailVisual">
           <ShikeDemo />
         </div>
       </section>
@@ -70,9 +74,9 @@ export default function Home() {
           <p>复杂的营养数据只有进入日常才有意义。食刻没有从功能清单开始，而是从“我怎样才愿意每天记”开始。</p>
         </header>
         <dl className="projectFactGrid">
-          <div><dt>FORMAT</dt><dd><strong>Android</strong><span>原生独立应用</span></dd></div>
-          <div><dt>RELEASE</dt><dd><strong>{version}</strong><span>正式签名版本</span></dd></div>
-          <div><dt>PRIVACY</dt><dd><strong>本地</strong><span>记录留在设备</span></dd></div>
+          <div><dt>FORMAT</dt><dd><strong>Android</strong><span>独立安装应用</span></dd></div>
+          <div><dt>RELEASE</dt><dd><strong>1.0.0</strong><span>正式签名版本</span></dd></div>
+          <div><dt>REAL USE</dt><dd><strong>半年</strong><span>持续放进日常使用</span></dd></div>
         </dl>
       </section>
 
@@ -83,62 +87,25 @@ export default function Home() {
           <p>交互尽量少，信息保持够用；模型负责理解照片，应用负责把结果变成可以长期回看的记录。</p>
         </header>
         <ol className="projectStepGrid">
-          <li><span>01</span><small>CAPTURE</small><strong>拍下食物</strong><p>从系统相机或照片选择器进入记录流程，并先在设备端压缩图片，减少不必要的传输与等待。</p></li>
-          <li><span>02</span><small>UNDERSTAND</small><strong>识别与估算</strong><p>你选择的视觉模型识别餐食内容，给出热量、蛋白质、碳水和脂肪估算。</p></li>
-          <li><span>03</span><small>REMEMBER</small><strong>留在当天</strong><p>把结果保存到本地日历式记录中，让趋势来自真实使用，而不是一次演示。</p></li>
+          <li><span>01</span><small>CAPTURE</small><strong>拍下食物</strong><p>从相机进入记录流程，并先压缩图片，减少不必要的传输与等待。</p></li>
+          <li><span>02</span><small>UNDERSTAND</small><strong>识别与估算</strong><p>视觉模型识别餐食内容，给出热量、蛋白质、碳水和脂肪估算。</p></li>
+          <li><span>03</span><small>REMEMBER</small><strong>留在当天</strong><p>把结果保存到本地日历式记录中，让趋势来自真实使用而不是一次演示。</p></li>
         </ol>
       </section>
 
       <section className="projectClosing" aria-labelledby="project-closing-title">
         <span className="sectionCode">WHAT MATTERS</span>
         <h2 id="project-closing-title">不是更复杂的健康系统，而是一个愿意每天打开的入口。</h2>
-        <p>食刻最重要的结果不是一次识别有多炫，而是记录动作足够轻，能够一直留在生活里。</p>
+        <p>食刻最重要的结果不是一次识别有多炫，而是记录动作足够轻，能在半年之后仍然留在生活里。</p>
       </section>
 
-      <footer className="siteDirectory">
-        <div className="directoryGrid">
-          <div className="directoryIntro">
-            <span className="finalChip" aria-hidden="true">G</span>
-            <strong>McGeeLee.</strong>
-            <p>做自己会用的，也做单纯好玩的。</p>
-            <span className="makingStatus"><i /> STILL MAKING · 2026</span>
-          </div>
-
-          <div className="directoryColumn" aria-label="精选项目">
-            <span>SELECTED WORK</span>
-            <a className="directoryItem" href="https://mcgeelee.com/work/shike/">
-              <strong>食刻 Shike</strong><small>照片识别 · 热量记录</small>
-            </a>
-            <a className="directoryItem" href="https://mcgeelee.com/work/zako/">
-              <strong>Zako</strong><small>流式 AI 语气改写</small>
-            </a>
-          </div>
-
-          <nav className="directoryColumn" aria-label="实验项目">
-            <span>LAB</span>
-            <a href="https://github.com/McGeeLee/LoveDist_bot" target="_blank" rel="noreferrer">
-              <strong>LoveDist Bot ↗</strong><small>实时位置 · 距离分享</small>
-            </a>
-            <a href="https://github.com/McGeeLee/MBTI-Test" target="_blank" rel="noreferrer">
-              <strong>MBTI Master ↗</strong><small>五种语言 · Web / Flutter</small>
-            </a>
-          </nav>
-
-          <nav className="directoryColumn directoryElsewhere" aria-label="站外链接">
-            <span>ELSEWHERE</span>
-            <a href="https://github.com/McGeeLee" target="_blank" rel="noreferrer">
-              <strong>GitHub ↗</strong><small>源码与公开项目</small>
-            </a>
-            <a href="https://zako.mcgeelee.com" target="_blank" rel="noreferrer">
-              <strong>Zako Live ↗</strong><small>在线 AI 语气改写</small>
-            </a>
-          </nav>
-        </div>
-
-        <div className="directoryBottom">
-          <span>© 2026 McGee Lee</span>
-          <span>PRODUCTS · AI TOOLS · WEEKEND LABS</span>
-        </div>
+      <footer className="projectDetailFooter">
+        <a href={portfolioUrl}>McGeeLee<span>.</span> <small>返回作品集</small></a>
+        <a className="projectNext" href="https://mcgeelee.com/work/zako/">
+          <small>NEXT / WORK 02</small>
+          <strong>Zako</strong>
+          <span aria-hidden="true">→</span>
+        </a>
       </footer>
     </main>
   );

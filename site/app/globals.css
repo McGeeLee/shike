@@ -2189,6 +2189,15 @@ button {
   transform: rotate(8deg);
 }
 
+.theme-toggle-moon,
+.theme-toggle-sun {
+  grid-area: 1 / 1;
+  place-self: center;
+  font-family: "Segoe UI Symbol", "Arial Unicode MS", sans-serif;
+  font-size: 1.08rem;
+  line-height: 1;
+}
+
 .theme-toggle-sun {
   display: none;
 }
@@ -2198,7 +2207,7 @@ button {
 }
 
 :root[data-theme="dark"] .theme-toggle-sun {
-  display: inline;
+  display: inline-grid;
 }
 
 .back-to-top {

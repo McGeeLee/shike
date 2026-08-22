@@ -1,11 +1,11 @@
 import { ShikeDemo } from './shike-demo';
 import { SiteHeader } from './site-controls';
+import { LatestShikeRelease } from './latest-shike-release';
 
 const pageUrl = 'https://shike.mcgeelee.com/';
 const portfolioUrl = 'https://mcgeelee.com/';
 const repositoryUrl = 'https://github.com/McGeeLee/shike';
-const releaseUrl =
-  'https://raw.githubusercontent.com/McGeeLee/mcgeelee-portfolio/main/public/downloads/shike-v1.0.0.apk';
+const releasesUrl = `${repositoryUrl}/releases/latest`;
 
 const structuredData = {
   '@context': 'https://schema.org',
@@ -16,7 +16,7 @@ const structuredData = {
   description: '通过视觉模型识别食物、估算热量与三大营养素，并在本地保存记录的 Android 应用。',
   applicationCategory: 'HealthApplication',
   operatingSystem: 'Android',
-  downloadUrl: releaseUrl,
+  downloadUrl: releasesUrl,
   codeRepository: repositoryUrl,
   author: {
     '@type': 'Person',
@@ -53,9 +53,7 @@ export default function Home() {
             <li>视觉模型</li><li>Android App</li><li>本地保存</li><li>图片压缩</li>
           </ul>
           <div className="projectDetailActions">
-            <a className="actionLink actionLinkPrimary" href={releaseUrl} download="shike-v1.0.0.apk">
-              下载正式版 1.0.0 <span aria-hidden="true">↓</span>
-            </a>
+            <LatestShikeRelease />
             <a className="actionLink actionLinkSecondary" href={repositoryUrl} target="_blank" rel="noreferrer">
               查看源码 <span aria-hidden="true">↗</span>
             </a>

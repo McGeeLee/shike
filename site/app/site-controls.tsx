@@ -132,7 +132,7 @@ export function SiteHeader() {
             title="切换日间或夜间模式"
           >
             <span className="theme-toggle-moon" aria-hidden="true">☾</span>
-            <span className="theme-toggle-sun" aria-hidden="true">☀</span>
+            <span className="theme-toggle-sun" aria-hidden="true">☼</span>
           </button>
           <a
             className="header-github"

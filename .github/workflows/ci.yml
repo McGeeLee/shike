@@ -1,16 +1,22 @@
-name: CI
+name: Android CI
 
 on:
   push:
     branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/ci.yml"
   pull_request:
+    paths:
+      - "android/**"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: android-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -30,6 +36,10 @@ jobs:
           distribution: temurin
           java-version: 25
           cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/gradle.properties
+            android/gradle/wrapper/gradle-wrapper.properties
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4

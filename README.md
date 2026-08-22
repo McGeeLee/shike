@@ -122,7 +122,9 @@ cd shike/android
 
 App 启动后至多每 24 小时请求一次本仓库的 GitHub 最新稳定 Release；检查失败时不会打扰正常使用。设置页的“检查更新”不受节流限制。发现更高版本后，Material 3 对话框会显示 Release Notes，在 App 私有目录下载匹配版本的已签名 APK 和校验文件，SHA-256 一致后才会唤起 Android 系统安装器。App 不内置 GitHub Token，也不会绕过系统确认静默安装 APK；Release 页面保留为下载失败时的备用入口。
 
-`.github/workflows/ci.yml` 会在 `main` 推送、Pull Request 和手动触发时运行单元测试、Compose 测试源码编译、Lint、Debug 构建和 R8 Release 构建。`.github/workflows/release.yml` 会在推送 `vMAJOR.MINOR.PATCH` 标签时执行以下流程：
+Android 和网站使用独立、按路径触发的 CI：修改 `android/` 时，`.github/workflows/ci.yml` 会运行单元测试、Compose 测试源码编译、Lint、Debug 构建和 R8 Release 构建；修改 `site/` 时，`.github/workflows/site-ci.yml` 会运行 ESLint 和 Cloudflare Pages 静态生产构建。两者都支持在 Actions 页面手动触发，同时修改两个目录时会并行运行。
+
+`.github/workflows/release.yml` 会在推送 `vMAJOR.MINOR.PATCH` 标签时执行以下流程：
 
 1. 从标签生成 Android `versionName`；
 2. 使用 Release 工作流 `run_number + 6` 生成递增的 `versionCode`，其中 `6` 是从原手工编号迁移到 CD 管理的基线；

@@ -3,7 +3,6 @@ import { SiteControls } from './site-controls';
 
 const version = '2.3.1';
 const repositoryUrl = 'https://github.com/McGeeLee/shike';
-const releasesUrl = `${repositoryUrl}/releases`;
 const releaseUrl = `${repositoryUrl}/releases/download/v${version}/shike-v${version}.apk`;
 
 const softwareSchema = {
@@ -96,11 +95,50 @@ export default function Home() {
         <p>食刻最重要的结果不是一次识别有多炫，而是记录动作足够轻，能够一直留在生活里。</p>
       </section>
 
-      <footer className="projectDetailFooter">
-        <a href="#top">食刻<span>.</span><small>回到页面顶部</small></a>
-        <a href={releasesUrl} className="projectNext" target="_blank" rel="noreferrer">
-          <small>GITHUB / RELEASES</small><strong>下载 v{version}</strong><span aria-hidden="true">→</span>
-        </a>
+      <footer className="siteDirectory">
+        <div className="directoryGrid">
+          <div className="directoryIntro">
+            <span className="finalChip" aria-hidden="true">G</span>
+            <strong>McGeeLee.</strong>
+            <p>做自己会用的，也做单纯好玩的。</p>
+            <span className="makingStatus"><i /> STILL MAKING · 2026</span>
+          </div>
+
+          <div className="directoryColumn" aria-label="精选项目">
+            <span>SELECTED WORK</span>
+            <a className="directoryItem" href="https://mcgeelee.com/work/shike/">
+              <strong>食刻 Shike</strong><small>照片识别 · 热量记录</small>
+            </a>
+            <a className="directoryItem" href="https://mcgeelee.com/work/zako/">
+              <strong>Zako</strong><small>流式 AI 语气改写</small>
+            </a>
+          </div>
+
+          <nav className="directoryColumn" aria-label="实验项目">
+            <span>LAB</span>
+            <a href="https://github.com/McGeeLee/LoveDist_bot" target="_blank" rel="noreferrer">
+              <strong>LoveDist Bot ↗</strong><small>实时位置 · 距离分享</small>
+            </a>
+            <a href="https://github.com/McGeeLee/MBTI-Test" target="_blank" rel="noreferrer">
+              <strong>MBTI Master ↗</strong><small>五种语言 · Web / Flutter</small>
+            </a>
+          </nav>
+
+          <nav className="directoryColumn directoryElsewhere" aria-label="站外链接">
+            <span>ELSEWHERE</span>
+            <a href="https://github.com/McGeeLee" target="_blank" rel="noreferrer">
+              <strong>GitHub ↗</strong><small>源码与公开项目</small>
+            </a>
+            <a href="https://zako.mcgeelee.com" target="_blank" rel="noreferrer">
+              <strong>Zako Live ↗</strong><small>在线 AI 语气改写</small>
+            </a>
+          </nav>
+        </div>
+
+        <div className="directoryBottom">
+          <span>© 2026 McGee Lee</span>
+          <span>PRODUCTS · AI TOOLS · WEEKEND LABS</span>
+        </div>
       </footer>
     </main>
   );

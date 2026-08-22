@@ -30,13 +30,14 @@ export function SiteControls() {
   return (
     <>
       <header className={`siteHeader${elevated ? ' isElevated' : ''}`}>
-        <a
+        <button
           className="wordmark"
-          href="https://mcgeelee.com/"
-          aria-label="返回 McGeeLee 主页"
+          type="button"
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          aria-label="回到页面顶部"
         >
           食刻<span aria-hidden="true">.</span>
-        </a>
+        </button>
         <div className="headerActions">
           <button
             className="themeToggle"

@@ -30,7 +30,7 @@
 - 支持 Claude、OpenAI、Gemini、Kimi、Grok、Mistral、通义千问、智谱 GLM、火山方舟、MiMo、DeepSeek，以及 OpenRouter、硅基流动和自定义兼容接口；
 - 原生协议优先：Claude Messages、OpenAI/xAI/方舟 Responses、Gemini generateContent；其余使用厂商官方兼容协议；
 - 所有服务商的模型列表都从对应 API 实时获取，不使用本地预置型号；有能力元数据时只展示可接收图片的模型；
-- DeepSeek 使用 `deepseek-flash`，通过官方 Chat Completions 接口发送高细节 Base64 图片并启用 JSON Output；
+- DeepSeek 使用 `deepseek-flash`，通过官方 Chat Completions 接口发送高细节 Base64 图片，显式关闭思考模式、保留 8192 个输出 token 并启用 JSON Output；
 - 提示词以可见证据、份量依据、项目合计一致性和不可信用户备注隔离为核心，减少臆测与提示词注入；
 - 长按桌面图标可直接“拍照记餐”或打开“模型设置”；
 - 内置完整“食刻”Material 3 品牌色方案，并可在设置中选择是否跟随系统壁纸动态配色（默认关闭）；

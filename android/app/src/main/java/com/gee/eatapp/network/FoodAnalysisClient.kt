@@ -141,16 +141,25 @@ class FoodAnalysisClient {
         ensureSuccessful(response)
         val payload = runCatching { JSONObject(response.body) }
             .getOrElse { throw IllegalStateException("模型返回了无效数据，请重试") }
-        val text = when (provider.protocol) {
+        var text = when (provider.protocol) {
             ApiProtocol.ANTHROPIC_MESSAGES -> extractClaudeText(payload)
             ApiProtocol.OPENAI_RESPONSES -> extractResponsesText(payload)
-            ApiProtocol.OPENAI_CHAT_COMPLETIONS -> extractMessageText(
-                payload.optJSONArray("choices")
-                    ?.optJSONObject(0)
-                    ?.optJSONObject("message")
-                    ?.opt("content"),
-            )
+            ApiProtocol.OPENAI_CHAT_COMPLETIONS -> extractChatCompletionText(payload)
             ApiProtocol.GEMINI_GENERATE_CONTENT -> extractGeminiText(payload)
+        }
+        // DeepSeek documents occasional empty content in JSON Output mode. Retry once
+        // without that mode, retaining the JSON-only prompt and the same image.
+        if (text.isBlank() && provider.id == "deepseek" &&
+            payload.optJSONArray("choices")?.optJSONObject(0)?.optString("finish_reason") == "stop"
+        ) {
+            val retry = requestOpenAiCompatible(
+                baseUrl, model, apiKey.trim(), imageBase64, userText,
+                deepSeekVision = true, useJsonMode = false,
+            )
+            ensureSuccessful(retry)
+            val retryPayload = runCatching { JSONObject(retry.body) }
+                .getOrElse { throw IllegalStateException("模型返回了无效数据，请重试") }
+            text = extractChatCompletionText(retryPayload)
         }
         if (text.isBlank() && provider.protocol == ApiProtocol.GEMINI_GENERATE_CONTENT) {
             val reason = payload.optJSONObject("promptFeedback")?.optString("blockReason")
@@ -347,6 +356,7 @@ class FoodAnalysisClient {
         imageBase64: String,
         userText: String,
         deepSeekVision: Boolean,
+        useJsonMode: Boolean = true,
     ): HttpResponse {
         val imageUrl = JSONObject()
             .put("url", "data:image/jpeg;base64,$imageBase64")
@@ -384,9 +394,7 @@ class FoodAnalysisClient {
                     ),
             )
         if (deepSeekVision) {
-            body
-                .put("max_tokens", 2048)
-                .put("response_format", JSONObject().put("type", "json_object"))
+            configureDeepSeekVisionRequest(body, useJsonMode)
         }
         return request(
             "$baseUrl/chat/completions",
@@ -551,19 +559,6 @@ class FoodAnalysisClient {
         }
     }
 
-    private fun extractMessageText(content: Any?): String = when (content) {
-        is String -> content
-        is JSONArray -> buildString {
-            for (index in 0 until content.length()) {
-                when (val part = content.opt(index)) {
-                    is String -> append(part)
-                    is JSONObject -> append(part.optString("text"))
-                }
-            }
-        }
-        else -> ""
-    }
-
     private fun safeNumber(value: Any?): Double {
         val number = when (value) {
             is Number -> value.toDouble()
@@ -685,4 +680,42 @@ internal fun buildFoodAnalysisUserPrompt(note: String): String {
             append("\n--- DATA END ---")
         }
     }
+}
+
+/** Food JSON needs a final answer rather than a reasoning-only completion. */
+internal fun configureDeepSeekVisionRequest(body: JSONObject, useJsonMode: Boolean = true): JSONObject {
+    body.put("thinking", JSONObject().put("type", "disabled")).put("max_tokens", 8192)
+    if (useJsonMode) body.put("response_format", JSONObject().put("type", "json_object"))
+    else body.remove("response_format")
+    return body
+}
+
+internal fun extractChatCompletionText(payload: JSONObject): String {
+    val choice = payload.optJSONArray("choices")?.optJSONObject(0) ?: return ""
+    val message = choice.optJSONObject("message")
+    when (choice.optString("finish_reason")) {
+        "length" -> throw IllegalStateException("模型输出达到长度限制，未完成识别；请减少照片中的食物数量后重试")
+        "content_filter" -> throw IllegalStateException("模型服务拦截了这次识别，请更换照片后重试")
+    }
+    if (!(message?.opt("refusal") as? String).isNullOrBlank()) {
+        throw IllegalStateException("模型拒绝了这次识别，请更换照片后重试")
+    }
+    val text = when (val content = message?.opt("content")) {
+        is String -> content
+        is JSONArray -> buildString {
+            for (index in 0 until content.length()) {
+                when (val part = content.opt(index)) {
+                    is String -> append(part)
+                    is JSONObject -> if (part.optString("type") in listOf("", "text", "output_text")) {
+                        append(part.optString("text"))
+                    }
+                }
+            }
+        }
+        else -> ""
+    }
+    if (text.isBlank() && !(message?.opt("reasoning_content") as? String).isNullOrBlank()) {
+        throw IllegalStateException("模型只返回了思考内容，没有最终识别结果；请关闭所选模型的思考模式或更换模型")
+    }
+    return text
 }

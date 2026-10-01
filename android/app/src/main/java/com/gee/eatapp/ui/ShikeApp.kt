@@ -148,14 +148,14 @@ fun ShikeApp(viewModel: ShikeViewModel) {
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     var showImageSourceDialog by rememberSaveable { mutableStateOf(false) }
-    var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingCameraUri by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingInstallPath by rememberSaveable { mutableStateOf<String?>(null) }
 
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) viewModel.prepareImage(uri)
     }
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captured ->
-        val uri = pendingCameraUri
+        val uri = pendingCameraUri?.let(Uri::parse)
         pendingCameraUri = null
         if (captured && uri != null) viewModel.prepareImage(uri)
     }
@@ -212,7 +212,7 @@ fun ShikeApp(viewModel: ShikeViewModel) {
             onCamera = {
                 showImageSourceDialog = false
                 createCaptureUri(context).also {
-                    pendingCameraUri = it
+                    pendingCameraUri = it.toString()
                     cameraLauncher.launch(it)
                 }
             },

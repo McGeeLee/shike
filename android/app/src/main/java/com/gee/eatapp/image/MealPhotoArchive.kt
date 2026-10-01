@@ -41,7 +41,8 @@ class MealPhotoArchive(filesDir: File) {
         require(entries.isNotEmpty()) { "这一天没有照片" }
         ZipOutputStream(output).use { zip ->
             entries.forEachIndexed { index, entry ->
-                zip.putNextEntry(ZipEntry("$date/${index + 1}-${entry.time.replace(':', '-')}.jpg"))
+                val time = entry.time.replace(Regex("[^0-9-]"), "-").take(30)
+                zip.putNextEntry(ZipEntry("$date/${index + 1}-$time.jpg"))
                 zip.write(bytes(entry))
                 zip.closeEntry()
             }

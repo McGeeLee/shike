@@ -230,6 +230,7 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteMeal(index: Int) {
         if (index !in uiState.entries.indices) return
+        uiState.deletedMeal?.let { consumeDelete(it.eventId) }
         val entries = uiState.entries.toMutableList()
         val entry = entries.removeAt(index)
         repository.saveEntries(uiState.selectedDate, entries)
@@ -253,7 +254,11 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun consumeDelete(eventId: Long) {
-        if (uiState.deletedMeal?.eventId == eventId) uiState = uiState.copy(deletedMeal = null)
+        val deleted = uiState.deletedMeal?.takeIf { it.eventId == eventId } ?: return
+        uiState = uiState.copy(deletedMeal = null)
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.gee.eatapp.image.MealPhotoArchive(getApplication<Application>().filesDir).delete(deleted.entry.photoFile)
+        }
     }
 
     fun openSettings() {

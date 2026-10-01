@@ -13,13 +13,14 @@ import org.junit.rules.TemporaryFolder
 
 class MealPhotoArchiveTest {
     @get:Rule val temporary = TemporaryFolder()
+    private fun archive() = MealPhotoArchive(temporary.root) { Base64.getDecoder().decode(it) }
     private fun entry(photo: String = "", thumbnail: String = "") = MealEntry(
         "meal-1", "=SUM(1,2)\n米饭", 300, 10.0, 50.0, 8.0, "12:30", "备注,含\"引号\"", thumbnail,
         photoFile = photo, analysisNotes = "约150克", modelLabel = "视觉模型",
     )
 
     @Test fun savesClearPhotoAndExportsDatedZipWithEscapedNutrition() {
-        val archive = MealPhotoArchive(temporary.root)
+        val archive = archive()
         val bytes = byteArrayOf(1, 2, 3, 4)
         val file = archive.save("meal-1", bytes)
         val entry = entry(file)
@@ -42,11 +43,11 @@ class MealPhotoArchiveTest {
 
     @Test fun legacyThumbnailRemainsDownloadable() {
         val bytes = byteArrayOf(5, 6, 7)
-        assertArrayEquals(bytes, MealPhotoArchive(temporary.root).bytes(entry(thumbnail = Base64.getEncoder().encodeToString(bytes))))
+        assertArrayEquals(bytes, archive().bytes(entry(thumbnail = Base64.getEncoder().encodeToString(bytes))))
     }
 
     @Test fun deletionRemovesPhotoAndFallsBackToLegacyThumbnail() {
-        val archive = MealPhotoArchive(temporary.root)
+        val archive = archive()
         val file = archive.save("meal-1", byteArrayOf(1))
         archive.delete(file)
         assertArrayEquals(byteArrayOf(2), archive.bytes(entry(file, "Ag==")))
@@ -54,7 +55,7 @@ class MealPhotoArchiveTest {
     }
 
     @Test fun rejectsPathTraversalAndMissingPhotos() {
-        val archive = MealPhotoArchive(temporary.root)
+        val archive = archive()
         assertThrows(IllegalArgumentException::class.java) { archive.save("../escape", byteArrayOf(1)) }
         assertThrows(IllegalStateException::class.java) { archive.bytes(entry("../escape.jpg")) }
         assertThrows(IllegalArgumentException::class.java) { archive.exportDay(LocalDate.now(), emptyList(), ByteArrayOutputStream()) }

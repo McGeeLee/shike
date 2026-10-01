@@ -4,12 +4,16 @@ import com.gee.eatapp.data.MealEntry
 import java.io.File
 import java.io.OutputStream
 import java.time.LocalDate
-import java.util.Base64
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 /** Clear photos live outside preferences; legacy records can still export their thumbnail. */
-class MealPhotoArchive(filesDir: File) {
+class MealPhotoArchive(
+    filesDir: File,
+    private val decodeThumbnail: (String) -> ByteArray = {
+        android.util.Base64.decode(it, android.util.Base64.DEFAULT)
+    },
+) {
     private val directory = File(filesDir, "meal_photos")
 
     fun save(id: String, jpeg: ByteArray): String {
@@ -32,7 +36,7 @@ class MealPhotoArchive(filesDir: File) {
     fun bytes(entry: MealEntry): ByteArray {
         val photo = file(entry.photoFile)
         if (photo?.isFile == true) return photo.readBytes()
-        return runCatching { Base64.getDecoder().decode(entry.thumbnailBase64) }
+        return runCatching { decodeThumbnail(entry.thumbnailBase64) }
             .getOrNull()?.takeIf { it.isNotEmpty() }
             ?: throw IllegalStateException("这条记录没有可用照片")
     }

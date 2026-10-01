@@ -41,6 +41,17 @@ class AppModelsTest {
     }
 
     @Test
+    fun deepSeekFlashAliasesUseCurrentVisionModel() {
+        listOf("deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp").forEach { alias ->
+            assertEquals("deepseek-flash", AppSettings(providerId = "deepseek", model = alias).effectiveModel())
+            assertEquals("deepseek-flash", normalizeDeepSeekVisionModel(alias))
+        }
+        assertEquals("deepseek-v4-pro", normalizeDeepSeekVisionModel("deepseek-v4-pro"))
+        assertEquals("deepseek-future", AppSettings(providerId = "deepseek", model = "deepseek-future").effectiveModel())
+        assertEquals("deepseek-v4-flash-vision-exp", AppSettings(providerId = "custom", customModel = "deepseek-v4-flash-vision-exp").effectiveModel())
+    }
+
+    @Test
     fun dailySummaryClampsInvalidNutritionValues() {
         val entries = listOf(
             MealEntry("1", "米饭", 180, 4.0, 40.0, 0.5, "12:00", "", ""),

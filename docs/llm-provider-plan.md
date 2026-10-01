@@ -27,7 +27,7 @@
 | 智谱 GLM | 官方兼容入口 | `/v4/models` | 提示选择 GLM-4V 等视觉模型 | 已接入 |
 | OpenRouter | 官方聚合兼容入口 | 带 image/text 模态筛选的 Models API | 二次校验模型元数据 | 已接入 |
 | 硅基流动 | 官方聚合兼容入口 | `/v1/models` | 提示选择模型广场中的 VLM | 已接入 |
-| DeepSeek | 官方 Chat Completions | `/models` 动态获取并筛选 `deepseek-v4-flash-vision-exp` | Base64 `image_url` 高细节输入 | 已接入视觉与 JSON Output |
+| DeepSeek | 官方 Chat Completions | `/models` 动态获取并筛选 `deepseek-flash` | Base64 `image_url` 高细节输入 | 已接入视觉与 JSON Output |
 | 自定义服务 | OpenAI Chat Completions | 自定义 `/models` | 用户负责选择支持 `image_url` 的模型 | 已保留 |
 
 ## 提示词与结果质量

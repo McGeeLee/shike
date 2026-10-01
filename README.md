@@ -30,7 +30,7 @@
 - 支持 Claude、OpenAI、Gemini、Kimi、Grok、Mistral、通义千问、智谱 GLM、火山方舟、MiMo、DeepSeek，以及 OpenRouter、硅基流动和自定义兼容接口；
 - 原生协议优先：Claude Messages、OpenAI/xAI/方舟 Responses、Gemini generateContent；其余使用厂商官方兼容协议；
 - 所有服务商的模型列表都从对应 API 实时获取，不使用本地预置型号；有能力元数据时只展示可接收图片的模型；
-- DeepSeek 使用 `deepseek-v4-flash-vision-exp`，通过官方 Chat Completions 接口发送高细节 Base64 图片并启用 JSON Output；
+- DeepSeek 使用 `deepseek-flash`，通过官方 Chat Completions 接口发送高细节 Base64 图片并启用 JSON Output；
 - 提示词以可见证据、份量依据、项目合计一致性和不可信用户备注隔离为核心，减少臆测与提示词注入；
 - 长按桌面图标可直接“拍照记餐”或打开“模型设置”；
 - 内置完整“食刻”Material 3 品牌色方案，并可在设置中选择是否跟随系统壁纸动态配色（默认关闭）；
@@ -66,7 +66,7 @@
 | 通义千问、智谱 GLM、硅基流动 | OpenAI 兼容 Chat Completions | 从各自 `/models` 获取，选择 VL/VLM 型号 |
 | 火山引擎方舟 | Responses API | 从 `/api/v3/models` 获取，选择已开通视觉能力的模型或接入点 |
 | Xiaomi MiMo | Chat Completions | 从 `/v1/models` 获取并只保留 `mimo-v2.5` |
-| DeepSeek | Chat Completions | 从 `/models` 获取并只保留 `deepseek-v4-flash-vision-exp` |
+| DeepSeek | Chat Completions | 从 `/models` 获取并只保留 `deepseek-flash` |
 | OpenRouter | Chat Completions | 使用带 image/text 模态筛选的 Models API |
 | 自定义服务 | OpenAI 兼容 Chat Completions | 从 `{baseUrl}/models` 获取，接口与模型须支持 `image_url` |
 

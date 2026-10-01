@@ -12,6 +12,7 @@ import com.gee.eatapp.data.ProviderDefinition
 import com.gee.eatapp.data.effectiveModel
 import com.gee.eatapp.data.normalizeBaseUrl
 import com.gee.eatapp.data.normalizeModelIds
+import com.gee.eatapp.data.normalizeDeepSeekVisionModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -71,7 +72,8 @@ class FoodAnalysisClient {
             val normalized = normalizeModelIds(values)
             val selectable = when (provider.id) {
                 "mimo" -> normalized.filter { it.equals("mimo-v2.5", ignoreCase = true) }
-                "deepseek" -> normalized.filter { it.equals(DEEPSEEK_VISION_MODEL, ignoreCase = true) }
+                "deepseek" -> normalized.map(::normalizeDeepSeekVisionModel)
+                    .filter { it == DEEPSEEK_VISION_MODEL }.distinct()
                 else -> normalized
             }
             selectable.ifEmpty {
@@ -79,7 +81,7 @@ class FoodAnalysisClient {
                     throw IllegalStateException("连接成功，但未发现当前支持图片输入的 MiMo-V2.5 模型")
                 }
                 if (provider.id == "deepseek" && normalized.isNotEmpty()) {
-                    throw IllegalStateException("连接成功，但未发现 DeepSeek V4 Flash Vision Exp 视觉模型")
+                    throw IllegalStateException("连接成功，但未发现 DeepSeek Flash 视觉模型")
                 }
                 throw IllegalStateException("连接成功，但该 API Key 没有返回可用模型")
             }

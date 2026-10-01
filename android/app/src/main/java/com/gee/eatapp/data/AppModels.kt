@@ -5,7 +5,12 @@ import java.time.LocalDate
 import java.util.Locale
 import kotlin.math.roundToInt
 
-const val DEEPSEEK_VISION_MODEL = "deepseek-v4-flash-vision-exp"
+const val DEEPSEEK_VISION_MODEL = "deepseek-flash"
+
+internal fun normalizeDeepSeekVisionModel(model: String): String = when (model.trim().lowercase(Locale.ROOT)) {
+    "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", DEEPSEEK_VISION_MODEL -> DEEPSEEK_VISION_MODEL
+    else -> model.trim()
+}
 
 enum class ApiProtocol {
     ANTHROPIC_MESSAGES,
@@ -159,11 +164,11 @@ fun AppSettings.effectiveModel(): String {
     val selected = model.trim().take(200)
     return if (
         providerId == "deepseek" &&
-        (selected == "deepseek-v4-flash" || selected == "deepseek-v4-pro")
+        (selected == "deepseek-v4-pro")
     ) {
         DEEPSEEK_VISION_MODEL
     } else {
-        selected
+        if (providerId == "deepseek") normalizeDeepSeekVisionModel(selected) else selected
     }
 }
 

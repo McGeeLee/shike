@@ -55,10 +55,11 @@ data class SettingsDraft(
 
 sealed interface MealPanel {
     data object Hidden : MealPanel
+    data object Saving : MealPanel
     data object Preparing : MealPanel
     data class Preview(val image: PreparedImage, val note: String = "") : MealPanel
     data class Analyzing(val image: PreparedImage, val note: String) : MealPanel
-    data class Result(val image: PreparedImage, val note: String, val result: AnalysisResult) : MealPanel
+    data class Result(val image: PreparedImage, val note: String, val result: AnalysisResult, val saveError: String = "") : MealPanel
     data class Error(val message: String, val image: PreparedImage? = null, val note: String = "") : MealPanel
 }
 
@@ -174,28 +175,54 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveMeal() {
         val panel = uiState.mealPanel as? MealPanel.Result ?: return
-        val result = panel.result
-        val entry = MealEntry(
-            id = UUID.randomUUID().toString(),
-            name = result.foods.joinToString("、") { it.name },
-            calories = result.totalCalories,
-            proteinGrams = result.foods.sumOf { it.proteinGrams },
-            carbsGrams = result.foods.sumOf { it.carbsGrams },
-            fatGrams = result.foods.sumOf { it.fatGrams },
-            time = LocalTime.now().format(TIME_FORMAT),
-            note = panel.note,
-            thumbnailBase64 = panel.image.thumbnailBase64,
-        )
-        val entries = uiState.entries + entry
-        repository.saveEntries(uiState.selectedDate, entries)
-        uiState = uiState.copy(
-            entries = entries,
-            nutritionHistory = updatedNutritionHistory(uiState.selectedDate, entries),
-            mealPanel = MealPanel.Hidden,
-        )
+        val date = uiState.selectedDate
+        val settings = uiState.settings
+        uiState = uiState.copy(mealPanel = MealPanel.Saving)
+        viewModelScope.launch {
+            val result = panel.result
+            val id = UUID.randomUUID().toString()
+            runCatching {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val archive = com.gee.eatapp.image.MealPhotoArchive(getApplication<Application>().filesDir)
+                    val photoFile = archive.save(id, android.util.Base64.decode(panel.image.analysisBase64, android.util.Base64.NO_WRAP))
+                    val entry = MealEntry(
+                        id = id,
+                        name = result.foods.joinToString("、") { it.name },
+                        calories = result.totalCalories,
+                        proteinGrams = result.foods.sumOf { it.proteinGrams },
+                        carbsGrams = result.foods.sumOf { it.carbsGrams },
+                        fatGrams = result.foods.sumOf { it.fatGrams },
+                        time = LocalTime.now().format(TIME_FORMAT),
+                        note = panel.note,
+                        thumbnailBase64 = panel.image.thumbnailBase64,
+                        photoFile = photoFile,
+                        analysisNotes = result.notes,
+                        modelLabel = "${ProviderCatalog.find(settings.providerId)?.name} · ${settings.effectiveModel()}",
+                    )
+                    val entries = repository.entries(date) + entry
+                    try {
+                        repository.saveEntries(date, entries)
+                    } catch (error: Exception) {
+                        archive.delete(photoFile)
+                        throw error
+                    }
+                    entries
+                }
+            }.onSuccess { entries ->
+                uiState = uiState.copy(
+                    entries = if (uiState.selectedDate == date) entries else uiState.entries,
+                    nutritionHistory = updatedNutritionHistory(date, entries),
+                    mealPanel = MealPanel.Hidden,
+                )
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                uiState = uiState.copy(mealPanel = panel.copy(saveError = error.message ?: "保存失败，请重试"))
+            }
+        }
     }
 
     fun dismissMealPanel() {
+        if (uiState.mealPanel == MealPanel.Saving) return
         imageJob?.cancel()
         analysisJob?.cancel()
         uiState = uiState.copy(mealPanel = MealPanel.Hidden)
@@ -271,8 +298,8 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectModel(model: String) = updateDraft { draft ->
         draft.copy(
-            selectedModel = model.take(200),
-            selections = draft.selections + (draft.providerId to model.take(200)),
+            selectedModel = model.filterNot { it.code < 32 || it.code == 127 }.trim().take(200),
+            selections = draft.selections + (draft.providerId to model.filterNot { it.code < 32 || it.code == 127 }.trim().take(200)),
             errorMessage = "",
         )
     }
@@ -424,7 +451,7 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
                     val current = uiState.settingsDraft ?: return@onSuccess
                     if (current.providerId != draft.providerId) return@onSuccess
                     val provider = ProviderCatalog.find(current.providerId) ?: return@onSuccess
-                    val selected = current.selectedModel.takeIf(models::contains) ?: models.first()
+                    val selected = current.selectedModel.takeIf(String::isNotBlank) ?: models.first()
                     uiState = uiState.copy(
                         settingsDraft = current.copy(
                             selectedModel = selected,
@@ -499,7 +526,7 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    private fun selectDate(date: LocalDate) {
+    fun selectDate(date: LocalDate) {
         if (date > LocalDate.now()) return
         uiState = uiState.copy(selectedDate = date, entries = repository.entries(date))
     }

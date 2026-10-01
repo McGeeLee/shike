@@ -200,6 +200,7 @@ fun ShikeApp(viewModel: ShikeViewModel) {
         onOpenSettings = viewModel::openSettings,
         onAddMeal = { showImageSourceDialog = true },
         onDeleteMeal = viewModel::deleteMeal,
+        onSelectDate = viewModel::selectDate,
     )
 
     if (showImageSourceDialog) {
@@ -308,6 +309,7 @@ fun ShikeHomeScreen(
     onOpenSettings: () -> Unit,
     onAddMeal: () -> Unit,
     onDeleteMeal: (Int) -> Unit,
+    onSelectDate: (LocalDate) -> Unit = {},
 ) {
     var selectedSectionName by rememberSaveable { mutableStateOf(HomeSection.RECORDS.name) }
     val selectedSection = HomeSection.entries.firstOrNull { it.name == selectedSectionName }
@@ -353,6 +355,7 @@ fun ShikeHomeScreen(
                         onOpenSettings = onOpenSettings,
                         onAddMeal = onAddMeal,
                         onDeleteMeal = onDeleteMeal,
+                        onSelectDate = onSelectDate,
                     )
                     HomeSection.STATISTICS -> StatisticsView(
                         history = state.nutritionHistory,
@@ -417,8 +420,10 @@ private fun RecordView(
     onOpenSettings: () -> Unit,
     onAddMeal: () -> Unit,
     onDeleteMeal: (Int) -> Unit,
+    onSelectDate: (LocalDate) -> Unit = {},
 ) {
     DateNavigator(state.selectedDate, onPreviousDay, onNextDay, onToday)
+    DateJumpButton(state.selectedDate, onSelectDate)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         if (maxWidth >= ShikeDimensions.WideBreakpoint) {
             Row(
@@ -955,6 +960,7 @@ private fun EntryCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.titleMedium,
             )
+            MealPhotoGallery(date, entries)
             Spacer(Modifier.height(10.dp))
             if (entries.isEmpty()) {
                 Text(
@@ -1123,9 +1129,16 @@ internal fun SettingsSheet(
                 modifier = Modifier.testTag("modelField"),
             )
             Text(
-                "模型列表通过当前服务商的 API 实时获取，不使用本地预置列表。",
+                "实时获取模型，或填写服务商提供的视觉模型 ID。新模型无需等待 App 更新。",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedTextField(
+                value = draft.selectedModel,
+                onValueChange = onModelSelected,
+                label = { Text("视觉模型 ID（可手动填写）") },
+                modifier = Modifier.fillMaxWidth().testTag("manualModelField"),
+                singleLine = true,
             )
             Spacer(Modifier.height(14.dp))
             OutlinedTextField(
@@ -1605,6 +1618,7 @@ private fun MealPanelSheet(
         ) {
             when (panel) {
                 MealPanel.Hidden -> Unit
+                MealPanel.Saving -> LoadingContent("正在保存照片和记录…")
                 MealPanel.Preparing -> LoadingContent("正在优化照片…")
                 is MealPanel.Preview -> {
                     PreparedImageView(panel.image, "待识别的食物照片")
@@ -1624,6 +1638,7 @@ private fun MealPanelSheet(
                     LoadingContent("正在识别食物…")
                 }
                 is MealPanel.Result -> {
+                    if (panel.saveError.isNotBlank()) Text(panel.saveError, color = MaterialTheme.colorScheme.error)
                     PreparedImageView(panel.image, "食物照片")
                     if (panel.note.isNotBlank()) {
                         Text(

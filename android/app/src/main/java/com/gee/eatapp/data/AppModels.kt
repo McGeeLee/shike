@@ -218,6 +218,9 @@ data class MealEntry(
     val time: String,
     val note: String,
     val thumbnailBase64: String,
+    val photoFile: String = "",
+    val analysisNotes: String = "",
+    val modelLabel: String = "",
 )
 
 data class DailySummary(

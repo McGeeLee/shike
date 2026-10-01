@@ -58,7 +58,7 @@ class ShikeRepository(context: Context) {
     fun saveEntries(date: LocalDate, entries: List<MealEntry>) {
         val array = JSONArray()
         entries.forEach { array.put(it.toJson()) }
-        preferences.edit { putString(entriesKey(date), array.toString()) }
+        check(preferences.edit().putString(entriesKey(date), array.toString()).commit()) { "记录保存失败，请检查设备存储空间" }
     }
 
     fun nutritionHistory(endDate: LocalDate, days: Int): List<DailyNutritionPoint> {
@@ -134,6 +134,9 @@ class ShikeRepository(context: Context) {
         .put("time", time)
         .put("note", note)
         .put("thumb", thumbnailBase64)
+        .put("photoFile", photoFile)
+        .put("analysisNotes", analysisNotes)
+        .put("modelLabel", modelLabel)
 
     private fun JSONObject.toMealEntry(): MealEntry? {
         val name = optString("name", "未知食物").trim().take(300)
@@ -147,6 +150,9 @@ class ShikeRepository(context: Context) {
             fatGrams = optDouble("fat", 0.0).safeNutritionValue(),
             time = optString("time").take(30),
             note = optString("note").take(500),
+            photoFile = optString("photoFile").take(100),
+            analysisNotes = optString("analysisNotes").take(1000),
+            modelLabel = optString("modelLabel").take(300),
             thumbnailBase64 = optString("thumb")
                 .removePrefix("data:image/jpeg;base64,")
                 .take(MAX_THUMBNAIL_CHARS),

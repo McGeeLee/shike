@@ -73,7 +73,7 @@ export default function Home() {
         </header>
         <dl className="projectFactGrid">
           <div><dt>FORMAT</dt><dd><strong>Android</strong><span>独立安装应用</span></dd></div>
-          <div><dt>RELEASE</dt><dd><strong>1.0.0</strong><span>正式签名版本</span></dd></div>
+          <div><dt>RELEASE</dt><dd><strong>2.4.1</strong><span>正式签名版本</span></dd></div>
           <div><dt>REAL USE</dt><dd><strong>半年</strong><span>持续放进日常使用</span></dd></div>
         </dl>
       </section>

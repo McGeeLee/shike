@@ -5,9 +5,9 @@ import { useEffect, useState } from 'react';
 const latestReleaseApi = 'https://api.github.com/repos/McGeeLee/shike/releases/latest';
 
 const fallbackRelease = {
-  version: '2.3.1',
-  downloadUrl: 'https://github.com/McGeeLee/shike/releases/download/v2.3.1/shike-v2.3.1.apk',
-  size: 2_655_510,
+  version: '2.4.1',
+  downloadUrl: 'https://github.com/McGeeLee/shike/releases/download/v2.4.1/shike-v2.4.1.apk',
+  size: 2_671_898,
 };
 
 type Release = typeof fallbackRelease;

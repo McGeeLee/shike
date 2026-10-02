@@ -7,6 +7,11 @@ import kotlin.math.roundToInt
 
 const val DEEPSEEK_VISION_MODEL = "deepseek-flash"
 
+// Bounds apply to a single saved meal. Aggregate statistics use a separate limit.
+internal const val MAX_MEAL_CALORIES = 1_000_000
+internal const val MAX_NUTRITION_GRAMS = 100_000.0
+private const val MAX_TOTAL_NUTRITION_GRAMS = 1_000_000_000.0
+
 internal fun normalizeDeepSeekVisionModel(model: String): String = when (model.trim().lowercase(Locale.ROOT)) {
     "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", DEEPSEEK_VISION_MODEL -> DEEPSEEK_VISION_MODEL
     else -> model.trim()
@@ -236,10 +241,10 @@ data class DailySummary(
 ) {
     companion object {
         fun from(entries: List<MealEntry>) = DailySummary(
-            calories = entries.sumOf { it.calories.coerceAtLeast(0) },
-            proteinGrams = entries.sumOf { it.proteinGrams.safeNutritionValue() },
-            carbsGrams = entries.sumOf { it.carbsGrams.safeNutritionValue() },
-            fatGrams = entries.sumOf { it.fatGrams.safeNutritionValue() },
+            calories = entries.saturatedIntSum { it.calories.safeCalorieValue() },
+            proteinGrams = entries.saturatedNutritionSum { it.proteinGrams.safeNutritionValue() },
+            carbsGrams = entries.saturatedNutritionSum { it.carbsGrams.safeNutritionValue() },
+            fatGrams = entries.saturatedNutritionSum { it.fatGrams.safeNutritionValue() },
         )
     }
 }
@@ -260,16 +265,16 @@ data class NutritionStatistics(
     companion object {
         fun from(points: List<DailyNutritionPoint>): NutritionStatistics {
             val total = DailySummary(
-                calories = points.sumOf { it.summary.calories.coerceAtLeast(0) },
-                proteinGrams = points.sumOf { it.summary.proteinGrams.safeNutritionValue() },
-                carbsGrams = points.sumOf { it.summary.carbsGrams.safeNutritionValue() },
-                fatGrams = points.sumOf { it.summary.fatGrams.safeNutritionValue() },
+                calories = points.saturatedIntSum { it.summary.calories },
+                proteinGrams = points.saturatedNutritionSum { it.summary.proteinGrams },
+                carbsGrams = points.saturatedNutritionSum { it.summary.carbsGrams },
+                fatGrams = points.saturatedNutritionSum { it.summary.fatGrams },
             )
             val dayCount = points.size
             return NutritionStatistics(
                 dayCount = dayCount,
                 recordedDays = points.count { it.mealCount > 0 },
-                mealCount = points.sumOf { it.mealCount.coerceAtLeast(0) },
+                mealCount = points.saturatedIntSum { it.mealCount },
                 total = total,
                 dailyAverage = if (dayCount == 0) {
                     DailySummary(0, 0.0, 0.0, 0.0)
@@ -293,14 +298,17 @@ data class MacroEnergyDistribution(
 ) {
     val totalCalories: Double get() = proteinCalories + carbsCalories + fatCalories
 
-    fun shareOf(value: Double): Float =
-        if (totalCalories <= 0.0) 0f else (value / totalCalories).toFloat().coerceIn(0f, 1f)
+    fun shareOf(value: Double): Float {
+        val total = totalCalories
+        if (!value.isFinite() || !total.isFinite() || total <= 0.0) return 0f
+        return (value / total).toFloat().coerceIn(0f, 1f)
+    }
 
     companion object {
         fun from(summary: DailySummary) = MacroEnergyDistribution(
-            proteinCalories = summary.proteinGrams.safeNutritionValue() * 4.0,
-            carbsCalories = summary.carbsGrams.safeNutritionValue() * 4.0,
-            fatCalories = summary.fatGrams.safeNutritionValue() * 9.0,
+            proteinCalories = summary.proteinGrams.safeNutritionTotal() * 4.0,
+            carbsCalories = summary.carbsGrams.safeNutritionTotal() * 4.0,
+            fatCalories = summary.fatGrams.safeNutritionTotal() * 9.0,
         )
     }
 }
@@ -313,7 +321,25 @@ data class DeletedMeal(
 )
 
 internal fun Double.safeNutritionValue(): Double =
-    if (isFinite()) coerceAtLeast(0.0) else 0.0
+    if (isFinite()) coerceIn(0.0, MAX_NUTRITION_GRAMS) else 0.0
+
+internal fun Int.safeCalorieValue(): Int = coerceIn(0, MAX_MEAL_CALORIES)
+
+internal fun Double.safeCalorieValue(): Int =
+    if (isFinite()) coerceIn(0.0, MAX_MEAL_CALORIES.toDouble()).toInt() else 0
+
+private fun Double.safeNutritionTotal(): Double =
+    if (isFinite()) coerceIn(0.0, MAX_TOTAL_NUTRITION_GRAMS) else 0.0
+
+private inline fun <T> Iterable<T>.saturatedIntSum(value: (T) -> Int): Int =
+    fold(0L) { total, item ->
+        (total + value(item).coerceAtLeast(0).toLong()).coerceAtMost(Int.MAX_VALUE.toLong())
+    }.toInt()
+
+private inline fun <T> Iterable<T>.saturatedNutritionSum(value: (T) -> Double): Double =
+    fold(0.0) { total, item ->
+        (total + value(item).safeNutritionTotal()).coerceAtMost(MAX_TOTAL_NUTRITION_GRAMS)
+    }
 
 internal fun String.safeProviderId(): String =
     if (ProviderCatalog.find(this) != null) this else ProviderCatalog.all.first().id

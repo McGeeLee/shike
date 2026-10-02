@@ -7,6 +7,8 @@ import com.gee.eatapp.data.Confidence
 import com.gee.eatapp.data.DEEPSEEK_VISION_MODEL
 import com.gee.eatapp.data.FoodItem
 import com.gee.eatapp.data.ImageInputSupport
+import com.gee.eatapp.data.MAX_MEAL_CALORIES
+import com.gee.eatapp.data.MAX_NUTRITION_GRAMS
 import com.gee.eatapp.data.ProviderCatalog
 import com.gee.eatapp.data.ProviderDefinition
 import com.gee.eatapp.data.effectiveModel
@@ -189,7 +191,7 @@ class FoodAnalysisClient {
                     "format",
                     JSONObject()
                         .put("type", "json_schema")
-                        .put("schema", JSONObject(FOOD_SCHEMA_JSON)),
+                        .put("schema", foodAnalysisSchema(anthropicCompatible = true)),
                 ),
             )
             .put("system", FOOD_ANALYSIS_SYSTEM_PROMPT)
@@ -272,7 +274,7 @@ class FoodAnalysisClient {
                         .put("type", "json_schema")
                         .put("name", "food_analysis")
                         .put("strict", true)
-                        .put("schema", JSONObject(FOOD_SCHEMA_JSON)),
+                        .put("schema", foodAnalysisSchema()),
                 ),
             )
         }
@@ -331,13 +333,13 @@ class FoodAnalysisClient {
                     "text",
                     JSONObject()
                         .put("mimeType", "application/json")
-                        .put("schema", JSONObject(FOOD_SCHEMA_JSON)),
+                        .put("schema", foodAnalysisSchema()),
                 ),
             )
         } else {
             generationConfig
                 .put("responseMimeType", "application/json")
-                .put("responseJsonSchema", JSONObject(FOOD_SCHEMA_JSON))
+                .put("responseJsonSchema", foodAnalysisSchema())
         }
         body.put("generationConfig", generationConfig)
         return request(
@@ -488,30 +490,40 @@ class FoodAnalysisClient {
             .getOrElse { throw IllegalStateException("模型返回的 JSON 格式不正确，请重试") }
     }
 
-    private fun normalizeResult(source: JSONObject): AnalysisResult {
+    internal fun normalizeResult(source: JSONObject): AnalysisResult {
         val sourceFoods = source.optJSONArray("foods") ?: JSONArray()
+        if (sourceFoods.length() > MAX_ANALYSIS_FOODS) {
+            throw IllegalStateException("识别结果超过 $MAX_ANALYSIS_FOODS 项食物，请减少照片中的食物数量后重试")
+        }
         val foods = buildList {
-            for (index in 0 until minOf(sourceFoods.length(), 30)) {
-                val food = sourceFoods.optJSONObject(index) ?: continue
+            for (index in 0 until sourceFoods.length()) {
+                val food = sourceFoods.optJSONObject(index)
+                    ?: throw IllegalStateException("模型返回了无效的食物项目，请重试")
                 add(
                     FoodItem(
                         name = food.optString("name", "未知食物").take(100),
                         portion = food.optString("portion").take(100),
-                        calories = safeNumber(food.opt("calories")).roundToInt(),
-                        proteinGrams = safeNumber(food.opt("protein_g")),
-                        carbsGrams = safeNumber(food.opt("carbs_g")),
-                        fatGrams = safeNumber(food.opt("fat_g")),
+                        calories = boundedNumber(food.opt("calories"), MAX_MEAL_CALORIES.toDouble()).roundToInt(),
+                        proteinGrams = boundedNumber(food.opt("protein_g"), MAX_NUTRITION_GRAMS),
+                        carbsGrams = boundedNumber(food.opt("carbs_g"), MAX_NUTRITION_GRAMS),
+                        fatGrams = boundedNumber(food.opt("fat_g"), MAX_NUTRITION_GRAMS),
                     ),
                 )
             }
         }
-        val itemTotal = foods.sumOf { it.calories }
-        val total = itemTotal.takeIf { it > 0 }
-            ?: safeNumber(source.opt("total_calories")).roundToInt()
+        val itemTotal = foods.sumOf { it.calories.toLong() }
+        if (itemTotal > MAX_MEAL_CALORIES ||
+            foods.sumOf { it.proteinGrams } > MAX_NUTRITION_GRAMS ||
+            foods.sumOf { it.carbsGrams } > MAX_NUTRITION_GRAMS ||
+            foods.sumOf { it.fatGrams } > MAX_NUTRITION_GRAMS
+        ) {
+            throw IllegalStateException("模型返回的营养数值超出合理范围，请重试")
+        }
+        val isFood = source.optBoolean("is_food") && foods.isNotEmpty()
         return AnalysisResult(
-            isFood = source.optBoolean("is_food") && foods.isNotEmpty(),
-            foods = foods,
-            totalCalories = total,
+            isFood = isFood,
+            foods = if (isFood) foods else emptyList(),
+            totalCalories = if (isFood) itemTotal.toInt() else 0,
             confidence = when (source.optString("confidence")) {
                 "low" -> Confidence.LOW
                 "high" -> Confidence.HIGH
@@ -559,13 +571,16 @@ class FoodAnalysisClient {
         }
     }
 
-    private fun safeNumber(value: Any?): Double {
+    private fun boundedNumber(value: Any?, maximum: Double): Double {
         val number = when (value) {
             is Number -> value.toDouble()
             is String -> value.toDoubleOrNull()
             else -> null
-        } ?: 0.0
-        return if (number.isFinite()) number.coerceAtLeast(0.0) else 0.0
+        }
+        if (number == null || !number.isFinite() || number < 0.0 || number > maximum) {
+            throw IllegalStateException("模型返回的营养数值超出合理范围，请重试")
+        }
+        return number
     }
 
     private fun resolvedBaseUrl(provider: ProviderDefinition, settings: AppSettings): String =
@@ -621,27 +636,37 @@ class FoodAnalysisClient {
 
     private data class HttpResponse(val status: Int, val body: String)
 
-    private companion object {
-        const val ANTHROPIC_VERSION = "2023-06-01"
-        const val MODEL_TIMEOUT_MS = 20_000
-        const val ANALYSIS_TIMEOUT_MS = 120_000
-        const val MAX_IMAGE_BYTES = 8 * 1024 * 1024L
-        const val MAX_RESPONSE_BYTES = 4 * 1024 * 1024
-        val BASE64_PATTERN = Regex("^[A-Za-z0-9+/]+={0,2}$")
+    companion object {
+        internal const val MAX_ANALYSIS_FOODS = 30
 
-        const val JSON_SHAPE_HINT =
+        internal fun foodAnalysisSchema(anthropicCompatible: Boolean = false): JSONObject =
+            JSONObject(FOOD_SCHEMA_JSON).also { schema ->
+                if (anthropicCompatible) {
+                    // Anthropic rejects maxItems; the description and local validator retain the limit.
+                    schema.getJSONObject("properties").getJSONObject("foods").remove("maxItems")
+                }
+            }
+
+        private const val ANTHROPIC_VERSION = "2023-06-01"
+        private const val MODEL_TIMEOUT_MS = 20_000
+        private const val ANALYSIS_TIMEOUT_MS = 120_000
+        private const val MAX_IMAGE_BYTES = 8 * 1024 * 1024L
+        private const val MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+        private val BASE64_PATTERN = Regex("^[A-Za-z0-9+/]+={0,2}$")
+
+        private const val JSON_SHAPE_HINT =
             "{\"is_food\":true,\"foods\":[{\"name\":\"食物名\",\"portion\":\"约150克\",\"calories\":200," +
                 "\"protein_g\":10,\"carbs_g\":20,\"fat_g\":8}],\"total_calories\":200,\"confidence\":\"medium\"," +
                 "\"notes\":\"估算说明\"}"
 
-        const val FOOD_SCHEMA_JSON = """
+        private const val FOOD_SCHEMA_JSON = """
             {
               "type":"object",
               "properties":{
                 "is_food":{"type":"boolean"},
-                "foods":{"type":"array","items":{"type":"object","properties":{
-                  "name":{"type":"string"},"portion":{"type":"string"},"calories":{"type":"integer"},
-                  "protein_g":{"type":"number"},"carbs_g":{"type":"number"},"fat_g":{"type":"number"}
+                "foods":{"type":"array","maxItems":$MAX_ANALYSIS_FOODS,"description":"最多 $MAX_ANALYSIS_FOODS 项食物；营养构成相同的项目可合并估算，但不得遗漏可见食物。","items":{"type":"object","properties":{
+                  "name":{"type":"string"},"portion":{"type":"string"},"calories":{"type":"integer","description":"非负整份热量；一餐所有项目合计不超过 $MAX_MEAL_CALORIES 千卡。"},
+                  "protein_g":{"type":"number","description":"非负整份克数；一餐合计不超过 $MAX_NUTRITION_GRAMS 克。"},"carbs_g":{"type":"number","description":"非负整份克数；一餐合计不超过 $MAX_NUTRITION_GRAMS 克。"},"fat_g":{"type":"number","description":"非负整份克数；一餐合计不超过 $MAX_NUTRITION_GRAMS 克。"}
                 },"required":["name","portion","calories","protein_g","carbs_g","fat_g"],"additionalProperties":false}},
                 "total_calories":{"type":"integer"},
                 "confidence":{"type":"string","enum":["low","medium","high"]},
@@ -659,7 +684,7 @@ internal val FOOD_ANALYSIS_SYSTEM_PROMPT = """
 
     按以下规则分析：
     1. 先判断照片主体是否为可食用食物或饮品；若不是，is_food=false、foods=[]、total_calories=0。
-    2. 将一餐拆成可见且营养构成不同的项目；酱汁、烹调油、饮料或明显配料在可辨认时单独估算，不臆造被遮挡的食材。
+    2. 将一餐拆成可见且营养构成不同的项目，foods 最多 ${FoodAnalysisClient.MAX_ANALYSIS_FOODS} 项；营养构成相同的项目可合并估算，但不得为满足上限遗漏可见食物。酱汁、烹调油、饮料或明显配料在可辨认时单独估算，不臆造被遮挡的食材。
     3. 结合餐具、包装与常见份量估算可食部分的克数或毫升数，并在 portion 中写清依据。
     4. calories、protein_g、carbs_g、fat_g 均为该项目整份数值；total_calories 必须等于各项目 calories 之和。
     5. 无法精确判断时仍给出最合理的单点估值，并通过 confidence 与 notes 说明最大不确定因素，不输出宽泛免责声明。

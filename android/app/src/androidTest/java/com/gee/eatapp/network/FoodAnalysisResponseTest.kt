@@ -4,6 +4,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
+import com.gee.eatapp.data.MAX_MEAL_CALORIES
+import com.gee.eatapp.data.MAX_NUTRITION_GRAMS
 
 class FoodAnalysisResponseTest {
     @Test fun deepSeekExplicitlyDisablesThinkingAndLeavesEnoughAnswerBudget() {
@@ -66,6 +68,76 @@ class FoodAnalysisResponseTest {
             extractChatCompletionText(response(JSONObject(), "content_filter"))
         }
         assertTrue(error.message.orEmpty().contains("拦截"))
+    }
+
+    @Test fun normalFoodResultKeepsAllItemsAndUsesTheirCompleteTotal() {
+        val result = FoodAnalysisClient().normalizeResult(foodResult(2))
+        assertTrue(result.isFood)
+        assertEquals(2, result.foods.size)
+        assertEquals(200, result.totalCalories)
+        assertEquals(10.0, result.foods.first().proteinGrams, 0.0)
+    }
+
+    @Test fun thirtyFoodItemsAreAcceptedWithoutTruncation() {
+        val result = FoodAnalysisClient().normalizeResult(foodResult(30))
+        assertEquals(30, result.foods.size)
+        assertEquals(3000, result.totalCalories)
+    }
+
+    @Test fun thirtyOneFoodItemsAreRejectedInsteadOfLosingCalories() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            FoodAnalysisClient().normalizeResult(foodResult(31))
+        }
+        assertTrue(error.message.orEmpty().contains("30"))
+    }
+
+    @Test fun invalidAndOversizedNutritionValuesCannotBecomeSavedMeals() {
+        listOf("1e308", "NaN", "Infinity", -1, "not a number").forEach { value ->
+            val source = foodResult(1)
+            source.getJSONArray("foods").getJSONObject(0).put("protein_g", value)
+            assertThrows(IllegalStateException::class.java) { FoodAnalysisClient().normalizeResult(source) }
+        }
+        val source = foodResult(1)
+        source.getJSONArray("foods").getJSONObject(0).put("calories", Int.MAX_VALUE)
+        assertThrows(IllegalStateException::class.java) { FoodAnalysisClient().normalizeResult(source) }
+    }
+
+    @Test fun aggregateMealValuesHaveTheSameBoundsAsStoredMeals() {
+        val excessiveCalories = foodResult(2)
+        for (index in 0..1) {
+            excessiveCalories.getJSONArray("foods").getJSONObject(index).put("calories", MAX_MEAL_CALORIES)
+        }
+        assertThrows(IllegalStateException::class.java) { FoodAnalysisClient().normalizeResult(excessiveCalories) }
+
+        val excessiveProtein = foodResult(2)
+        for (index in 0..1) {
+            excessiveProtein.getJSONArray("foods").getJSONObject(index).put("protein_g", MAX_NUTRITION_GRAMS)
+        }
+        assertThrows(IllegalStateException::class.java) { FoodAnalysisClient().normalizeResult(excessiveProtein) }
+    }
+
+    @Test fun zeroCalorieFoodsDoNotUseAnInconsistentProviderTotal() {
+        val source = foodResult(1).put("total_calories", 500)
+        source.getJSONArray("foods").getJSONObject(0).put("calories", 0)
+        assertEquals(0, FoodAnalysisClient().normalizeResult(source).totalCalories)
+    }
+
+    @Test fun schemasKeepTheFoodLimitWithoutUnsupportedAnthropicKeywords() {
+        val generalFoods = FoodAnalysisClient.foodAnalysisSchema().getJSONObject("properties").getJSONObject("foods")
+        assertEquals(30, generalFoods.getInt("maxItems"))
+        val anthropicFoods = FoodAnalysisClient.foodAnalysisSchema(true).getJSONObject("properties").getJSONObject("foods")
+        assertFalse(anthropicFoods.has("maxItems"))
+        assertTrue(anthropicFoods.getString("description").contains("30"))
+    }
+
+    private fun foodResult(count: Int): JSONObject {
+        val foods = JSONArray()
+        repeat(count) { index ->
+            foods.put(JSONObject().put("name", "食物$index").put("portion", "100克")
+                .put("calories", 100).put("protein_g", 10).put("carbs_g", 20).put("fat_g", 2))
+        }
+        return JSONObject().put("is_food", true).put("foods", foods).put("total_calories", count * 100)
+            .put("confidence", "high").put("notes", "估算")
     }
 
     private fun response(message: JSONObject, finish: String = "stop") = JSONObject()

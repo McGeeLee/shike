@@ -89,7 +89,7 @@ update/AppUpdateClient.kt      GitHub Release 检查、APK 下载、校验和、
 
 主界面与日常运行不依赖 Capacitor、WebView、Node.js 或前端构建链。系统返回手势可直接驱动原生对话框和底部面板。
 
-从旧 Capacitor 版本升级时，App 仅会通过迁移适配器创建隐藏 WebView，一次性读取原 `https://localhost` 本地存储，把设置、API Key 和饮食记录导入原生存储。迁移完成后 WebView 不再参与界面或日常运行。
+从旧 Capacitor 版本升级时，App 仅会通过迁移适配器创建隐藏 WebView，一次性读取原 `https://localhost` 本地存储，把设置、API Key 和饮食记录导入原生存储。只有数据确认保存成功后才清除旧明文密钥；失败会保留原数据并在下次启动重试。已经迁移的用户会补做明文密钥清理，旧密钥保存在独立的 Keystore 加密恢复副本中，不覆盖或重新启用当前密钥。迁移及清理完成后 WebView 不再参与界面或日常运行。
 
 当前工具链：Android 17.1（compile SDK 37.1、target SDK 37）、Android Gradle Plugin 9.3.1、Gradle 9.7.0、AGP 9 内建 Kotlin、Compose BOM 2026.08.00、Material 3、JDK 25（Java 21 字节码目标）。发布构建启用 R8 代码压缩与资源收缩。
 
@@ -130,12 +130,14 @@ Android 和网站使用独立、按路径触发的 CI：修改 `android/` 时，
 `.github/workflows/release.yml` 会在推送 `vMAJOR.MINOR.PATCH` 标签时执行以下流程：
 
 1. 从标签生成 Android `versionName`；
-2. 使用 Release 工作流 `run_number + 6` 生成递增的 `versionCode`，其中 `6` 是从原手工编号迁移到 CD 管理的基线；
+2. 按 `MAJOR × 1,000,000 + MINOR × 1,000 + PATCH` 生成确定性的 `versionCode`，例如 `2.4.1 → 2004001`；`MINOR` 和 `PATCH` 均须小于 `1000`，结果必须在 Android 支持范围 `1–2100000000` 内；
 3. 运行测试、Lint 和 R8，并使用 GitHub Secrets 完成签名构建；
 4. 校验 APK 中的版本元数据和签名；
-5. 生成 SHA-256，并创建或更新 GitHub Release。
+5. 生成 SHA-256，并创建新的 GitHub Release。
 
-已有标签也可在 Actions 页面的 “Release APK” 工作流中手动触发发布。
+所有版本发布共用一个并发组；新正式版必须高于全部已发布正式版，发布前再次检查。已有标签也可在 Actions 页面的 “Release APK” 工作流中手动触发：已经完整发布的版本直接跳过，保留 APK、校验文件和 `latest` 指向，不重新编号或覆盖资产。已有但不完整的 Release 会拒绝自动覆盖，应修复发行状态或改用新版本标签。
+
+旧发行版保留原有构建编号；下一版的语义版本编号高于现有 `v2.4.0` 的 `versionCode=13`，可正常升级。重跑工作流不会改变新版本对应的编号。
 
 在首次自动发布前，需要在仓库 `Settings → Secrets and variables → Actions` 配置以下 Secrets：
 
@@ -158,16 +160,16 @@ printf '%s' 'your-key-password' | gh secret set ANDROID_KEY_PASSWORD
 发布时不再修改 `android/app/build.gradle` 中的版本信息，只需创建版本标签并推送；版本号和构建号均由 GitHub CD 注入：
 
 ```bash
-git tag -a v2.3.0 -m "食刻 2.3.0"
+git tag -a v2.4.1 -m "食刻 2.4.1"
 git push origin main
-git push origin v2.3.0
+git push origin v2.4.1
 ```
 
 本地构建默认使用 `versionName=0.0.0`、`versionCode=1`。需要复现指定版本时可执行：
 
 ```bash
 cd android
-SHIKE_VERSION_NAME=2.3.0 SHIKE_VERSION_CODE=7 ./gradlew assembleRelease
+SHIKE_VERSION_NAME=2.4.1 SHIKE_VERSION_CODE=2004001 ./gradlew assembleRelease
 ```
 
 正式 Release 的两个值始终由 GitHub CD 生成，不需要修改 Gradle 文件。
@@ -191,7 +193,7 @@ cd android
 
 - 饮食记录、目标和设置保存在 App 私有存储中；卸载 App 或清除数据会删除它们。
 - API Key 使用 Android Keystore 生成的 AES-GCM 密钥加密后保存，不写入源码或日志。
-- 食物照片在设备端压缩，只直接发送给用户选择的模型服务商；App 在私有目录保留用于识别的清晰 JPEG（最长边 1280 像素），不保留相机原始大图。删除记录并结束撤销窗口后，同时删除对应的本地照片。导出后的照片由用户自行管理。
+- 食物照片在设备端压缩，只直接发送给用户选择的模型服务商；App 在私有目录保留用于识别的清晰 JPEG（最长边 1280 像素）。相机原图在处理结束或取消拍摄后删除；因进程中断遗留的临时原图，超过 24 小时后会在下次启动清理，正在拍摄的文件除外。删除记录并结束撤销窗口后，同时删除对应的本地照片。导出后的照片由用户自行管理。
 - 自定义接口必须使用 HTTPS；原生网络策略拒绝明文 HTTP，并在 Android 17 上启用证书透明度与 ECH。
 - App 不申请相册读取权限；相册访问由系统 Photo Picker 授予单张图片权限。
 - 更新包只接受本仓库 GitHub Release 的 HTTPS 资产，下载到 App 私有目录并通过 SHA-256 后才共享给系统安装器；“安装未知应用”授权由用户在系统设置中单独控制。

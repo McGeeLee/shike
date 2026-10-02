@@ -12,3 +12,4 @@ android/release-signing.properties
 .idea/
 captures/
 *.log
+__pycache__/

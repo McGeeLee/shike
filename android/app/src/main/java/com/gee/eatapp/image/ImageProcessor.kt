@@ -62,10 +62,11 @@ class ImageProcessor(private val resolver: ContentResolver) {
         }
     }
 
-    private fun decodeLegacy(uri: Uri): Bitmap {
+    internal fun decodeLegacy(uri: Uri): Bitmap {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        val boundsStream = resolver.openInputStream(uri)
             ?: throw IllegalArgumentException("无法读取这张图片，请换一张重试")
+        boundsStream.use { BitmapFactory.decodeStream(it, null, bounds) }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
             throw IllegalArgumentException("无法读取这张图片，请换一张重试")
         }

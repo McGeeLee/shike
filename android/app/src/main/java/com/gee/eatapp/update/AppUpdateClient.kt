@@ -5,6 +5,7 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -29,9 +30,13 @@ data class AppRelease(
     val checksumUrl: String,
 )
 
-class AppUpdateClient {
+class AppUpdateClient internal constructor(
+    private val connectionFactory: (String) -> HttpURLConnection,
+) {
+    constructor() : this({ url -> URL(url).openConnection() as HttpURLConnection })
+
     suspend fun latestRelease(currentVersionName: String): AppRelease? = withContext(Dispatchers.IO) {
-        val connection = (URL(LATEST_RELEASE_URL).openConnection() as HttpURLConnection).apply {
+        val connection = connectionFactory(LATEST_RELEASE_URL).apply {
             requestMethod = "GET"
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
@@ -58,41 +63,57 @@ class AppUpdateClient {
         }
     }
 
-    suspend fun downloadRelease(context: Context, release: AppRelease): File = withContext(Dispatchers.IO) {
-        if (release.apkName != "shike-v${release.versionName}.apk" ||
-            !isTrustedAssetUrl(release.apkUrl) ||
-            !isTrustedAssetUrl(release.checksumUrl)
-        ) {
-            throw IOException("更新包信息不受信任")
-        }
-        val updateDirectory = File(context.filesDir, UPDATE_DIRECTORY)
-        if (!updateDirectory.exists() && !updateDirectory.mkdirs()) {
-            throw IOException("无法创建更新目录")
-        }
-        val target = File(updateDirectory, release.apkName)
-        val partial = File(updateDirectory, "${release.apkName}.part")
-        target.delete()
-        partial.delete()
+    suspend fun downloadRelease(context: Context, release: AppRelease): File = downloadRelease(
+        File(context.filesDir, UPDATE_DIRECTORY),
+        release,
+    ) { apk -> verifyDownloadedPackage(context, apk, release) }
 
+    internal suspend fun downloadRelease(
+        updateDirectory: File,
+        release: AppRelease,
+        verifyPackage: (File) -> Unit,
+    ): File {
+        var partial: File? = null
+        var target: File? = null
         try {
-            val checksumPayload = downloadBytes(release.checksumUrl, MAX_CHECKSUM_BYTES)
-                .toString(Charsets.UTF_8)
-            val expectedChecksum = parseSha256(checksumPayload)
-                ?: throw IOException("更新包校验文件无效")
-            downloadFile(release.apkUrl, partial, MAX_APK_BYTES)
-            val actualChecksum = partial.sha256()
-            if (!actualChecksum.equals(expectedChecksum, ignoreCase = true)) {
-                throw IOException("更新包完整性校验失败，请重新下载")
+            return withContext(Dispatchers.IO) {
+                if (release.apkName != "shike-v${release.versionName}.apk" ||
+                    !isTrustedAssetUrl(release.apkUrl) ||
+                    !isTrustedAssetUrl(release.checksumUrl)
+                ) {
+                    throw IOException("更新包信息不受信任")
+                }
+                if (!updateDirectory.exists() && !updateDirectory.mkdirs()) {
+                    throw IOException("无法创建更新目录")
+                }
+                // A cancelled blocking read can finish after a retry has started.
+                // Each call owns its files, including its cancellation cleanup.
+                val ownedPartial = File.createTempFile("shike-update-", ".part", updateDirectory)
+                    .also { partial = it }
+                val checksumPayload = downloadBytes(release.checksumUrl, MAX_CHECKSUM_BYTES)
+                    .toString(Charsets.UTF_8)
+                val expectedChecksum = parseSha256(checksumPayload)
+                    ?: throw IOException("更新包校验文件无效")
+                downloadFile(release.apkUrl, ownedPartial, MAX_APK_BYTES)
+                val actualChecksum = ownedPartial.sha256()
+                if (!actualChecksum.equals(expectedChecksum, ignoreCase = true)) {
+                    throw IOException("更新包完整性校验失败，请重新下载")
+                }
+                verifyPackage(ownedPartial)
+                val ownedTarget = File.createTempFile("shike-update-", ".apk", updateDirectory)
+                    .also { target = it }
+                if (!ownedPartial.renameTo(ownedTarget)) {
+                    ownedPartial.copyTo(ownedTarget, overwrite = true)
+                    ownedPartial.delete()
+                }
+                ownedTarget
             }
-            verifyDownloadedPackage(context, partial, release)
-            if (!partial.renameTo(target)) {
-                partial.copyTo(target, overwrite = true)
-                partial.delete()
-            }
-            target
         } catch (error: Throwable) {
-            partial.delete()
-            target.delete()
+            // Also catch cancellation while withContext dispatches its result.
+            withContext(NonCancellable + Dispatchers.IO) {
+                partial?.delete()
+                target?.delete()
+            }
             throw error
         }
     }
@@ -186,7 +207,7 @@ class AppUpdateClient {
     }
 
     private fun openDownloadConnection(url: String): HttpURLConnection {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+        val connection = connectionFactory(url).apply {
             requestMethod = "GET"
             connectTimeout = DOWNLOAD_CONNECT_TIMEOUT_MS
             readTimeout = DOWNLOAD_READ_TIMEOUT_MS

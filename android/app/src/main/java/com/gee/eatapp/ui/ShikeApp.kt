@@ -132,6 +132,7 @@ import com.gee.eatapp.data.ProviderCatalog
 import com.gee.eatapp.data.effectiveModel
 import com.gee.eatapp.data.simplifiedChinese
 import com.gee.eatapp.image.PreparedImage
+import com.gee.eatapp.image.CapturedPhotoStore
 import com.gee.eatapp.update.AppRelease
 import com.gee.eatapp.ui.theme.ShikeDimensions
 import com.gee.eatapp.ui.theme.ShikeTheme
@@ -157,7 +158,10 @@ fun ShikeApp(viewModel: ShikeViewModel) {
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captured ->
         val uri = pendingCameraUri?.let(Uri::parse)
         pendingCameraUri = null
-        if (captured && uri != null) viewModel.prepareImage(uri)
+        if (uri != null) {
+            if (captured) viewModel.prepareImage(uri, deleteCameraSource = true)
+            else viewModel.discardCameraImage(uri)
+        }
     }
     val unknownSourcesLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -174,6 +178,11 @@ fun ShikeApp(viewModel: ShikeViewModel) {
         }
     }
 
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            CapturedPhotoStore(context.cacheDir).cleanStale(pendingCameraUri?.let(Uri::parse)?.lastPathSegment)
+        }
+    }
     LaunchedEffect(state.imageSourceRequestId) {
         if (state.imageSourceRequestId != 0L) {
             showImageSourceDialog = true
@@ -211,9 +220,14 @@ fun ShikeApp(viewModel: ShikeViewModel) {
             onDismiss = { showImageSourceDialog = false },
             onCamera = {
                 showImageSourceDialog = false
-                createCaptureUri(context).also {
-                    pendingCameraUri = it.toString()
-                    cameraLauncher.launch(it)
+                runCatching {
+                    val uri = createCaptureUri(context)
+                    pendingCameraUri = uri.toString()
+                    cameraLauncher.launch(uri)
+                }.onFailure {
+                    pendingCameraUri?.let(Uri::parse)?.let(viewModel::discardCameraImage)
+                    pendingCameraUri = null
+                    coroutineScope.launch { snackbarHostState.showSnackbar("无法打开相机，请从相册选择照片") }
                 }
             },
             onGallery = {
@@ -1741,9 +1755,13 @@ private fun SheetActions(
 }
 
 private fun createCaptureUri(context: Context): Uri {
-    val directory = File(context.cacheDir, "images").apply { mkdirs() }
-    val file = File.createTempFile("meal_", ".jpg", directory)
-    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val file = CapturedPhotoStore(context.cacheDir).create()
+    return try {
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    } catch (error: Exception) {
+        file.delete()
+        throw error
+    }
 }
 
 private fun openReleasePage(context: Context, releaseUrl: String): Boolean {

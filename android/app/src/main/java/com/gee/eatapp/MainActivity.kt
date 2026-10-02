@@ -3,6 +3,7 @@ package com.gee.eatapp
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -10,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.gee.eatapp.data.LegacyDataMigrator
+import com.gee.eatapp.data.ShikeRepository
 import com.gee.eatapp.ui.ShikeApp
 import com.gee.eatapp.ui.ShikeViewModel
 import com.gee.eatapp.ui.theme.ShikeTheme
@@ -33,8 +35,16 @@ class MainActivity : ComponentActivity() {
             }
         }
         handleIntent(intent)
-        if (viewModel.legacyMigrationNeeded()) {
-            LegacyDataMigrator.read(this, viewModel::importLegacyData)
+        val repository = ShikeRepository(this)
+        if (repository.legacyDataNeedsAttention()) {
+            LegacyDataMigrator.read(
+                this,
+                onResult = viewModel::importLegacyData,
+                onKeysCleared = repository::markLegacyKeysCleared,
+                onError = {
+                    Toast.makeText(this, "旧数据迁移未完成，原数据已保留，下次启动将重试", Toast.LENGTH_LONG).show()
+                },
+            )
         }
     }
 

@@ -15,12 +15,11 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  group: release-${{ github.repository }}
   cancel-in-progress: false
 
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-  VERSION_CODE_OFFSET: 6
 
 jobs:
   release:
@@ -30,32 +29,34 @@ jobs:
       - name: Check out release tag
         uses: actions/checkout@v5
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: refs/tags/${{ env.RELEASE_TAG }}
           fetch-depth: 0
 
-      - name: Resolve release version
+      # A historical tag may predate the release policy. Always use the policy
+      # shipped with this workflow rather than scripts from the requested tag.
+      - name: Check out release policy
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-policy
+
+      - name: Validate release and resolve version
+        id: plan
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release tag must use vMAJOR.MINOR.PATCH format."
-            exit 1
-          fi
-          if [[ ! "$GITHUB_RUN_NUMBER" =~ ^[0-9]+$ || ! "$VERSION_CODE_OFFSET" =~ ^[0-9]+$ ]]; then
-            echo "GitHub run number and version-code offset must be non-negative integers."
-            exit 1
-          fi
-          version_name="${RELEASE_TAG#v}"
-          version_code=$((10#$VERSION_CODE_OFFSET + 10#$GITHUB_RUN_NUMBER))
-          if (( version_code < 1 || version_code > 2100000000 )); then
-            echo "Generated Android versionCode is outside the supported range."
-            exit 1
-          fi
-          printf 'SHIKE_VERSION_NAME=%s\n' "$version_name" >> "$GITHUB_ENV"
-          printf 'SHIKE_VERSION_CODE=%s\n' "$version_code" >> "$GITHUB_ENV"
-          printf '### Android release\n- versionName: `%s`\n- versionCode: `%s`\n' \
-            "$version_name" "$version_code" >> "$GITHUB_STEP_SUMMARY"
+          python3 -m unittest discover -s .release-policy/.github/scripts -p 'test_*.py'
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          python3 .release-policy/.github/scripts/release_plan.py \
+            --tag "$RELEASE_TAG" \
+            --releases-file "$RUNNER_TEMP/releases.json" \
+            --github-env "$GITHUB_ENV" \
+            --github-output "$GITHUB_OUTPUT" \
+            --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Set up JDK 25
+        if: steps.plan.outputs.publish == 'true'
         uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -63,12 +64,15 @@ jobs:
           cache: gradle
 
       - name: Set up Android SDK
+        if: steps.plan.outputs.publish == 'true'
         uses: android-actions/setup-android@v4
 
       - name: Install Android 37.1 platform
+        if: steps.plan.outputs.publish == 'true'
         run: sdkmanager "platforms;android-37.1"
 
       - name: Prepare release signing
+        if: steps.plan.outputs.publish == 'true'
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -93,6 +97,7 @@ jobs:
           chmod 600 android/.signing/* android/release-signing.properties
 
       - name: Test, lint, and build signed APK
+        if: steps.plan.outputs.publish == 'true'
         run: >-
           ./gradlew
           testDebugUnitTest
@@ -104,6 +109,7 @@ jobs:
         working-directory: android
 
       - name: Verify and checksum APK
+        if: steps.plan.outputs.publish == 'true'
         shell: bash
         run: |
           apk_path="android/app/build/outputs/apk/release/app-release.apk"
@@ -126,24 +132,24 @@ jobs:
           cd dist
           sha256sum "$artifact_name" > "$artifact_name.sha256"
 
-      - name: Create or update GitHub Release
+      - name: Publish new GitHub Release
+        if: steps.plan.outputs.publish == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Fail closed if a release was created outside this workflow while
+          # the build ran. Never upload over an existing release asset.
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases-before-publish.json"
+          python3 .release-policy/.github/scripts/release_plan.py \
+            --tag "$RELEASE_TAG" \
+            --releases-file "$RUNNER_TEMP/releases-before-publish.json" \
+            --require-publish
           artifact_name="shike-$RELEASE_TAG.apk"
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" \
-              "dist/$artifact_name#食刻 $RELEASE_TAG APK" \
-              "dist/$artifact_name.sha256#SHA-256" \
-              --clobber
-            gh release edit "$RELEASE_TAG" --latest
-          else
-            gh release create "$RELEASE_TAG" \
-              "dist/$artifact_name#食刻 $RELEASE_TAG APK" \
-              "dist/$artifact_name.sha256#SHA-256" \
-              --verify-tag \
-              --generate-notes \
-              --latest \
-              --title "食刻 $RELEASE_TAG"
-          fi
+          gh release create "$RELEASE_TAG" \
+            "dist/$artifact_name#食刻 $RELEASE_TAG APK" \
+            "dist/$artifact_name.sha256#SHA-256" \
+            --verify-tag \
+            --generate-notes \
+            --latest \
+            --title "食刻 $RELEASE_TAG"

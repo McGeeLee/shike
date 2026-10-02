@@ -1,15 +1,20 @@
 package com.gee.eatapp.data
 
 import android.content.Context
-import androidx.core.content.edit
+import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
 import java.util.UUID
 
-class ShikeRepository(context: Context) {
-    private val preferences = context.getSharedPreferences("shike_native", Context.MODE_PRIVATE)
-    private val keyStore = SecureApiKeyStore(context)
+class ShikeRepository internal constructor(
+    private val preferences: SharedPreferences,
+    private val keyStore: ApiKeyStore,
+) {
+    constructor(context: Context) : this(
+        context.getSharedPreferences("shike_native", Context.MODE_PRIVATE),
+        SecureApiKeyStore(context),
+    )
 
     fun settings(): AppSettings {
         val raw = preferences.getString(KEY_SETTINGS, null) ?: return AppSettings()
@@ -36,11 +41,11 @@ class ShikeRepository(context: Context) {
             .put("customBaseUrl", settings.customBaseUrl.take(2048))
             .put("customModel", settings.customModel.take(200))
             .put("dynamicColorEnabled", settings.dynamicColorEnabled)
-        preferences.edit {
+        keyStore.put(settings.providerId, apiKey)
+        preferences.commitOrThrow("设置保存失败，请检查设备存储空间") {
             putString(KEY_SETTINGS, json.toString())
             putInt(KEY_GOAL, goal.coerceIn(1, MAX_GOAL))
         }
-        keyStore.put(settings.providerId, apiKey)
     }
 
     fun entries(date: LocalDate): List<MealEntry> {
@@ -58,7 +63,9 @@ class ShikeRepository(context: Context) {
     fun saveEntries(date: LocalDate, entries: List<MealEntry>) {
         val array = JSONArray()
         entries.forEach { array.put(it.toJson()) }
-        check(preferences.edit().putString(entriesKey(date), array.toString()).commit()) { "记录保存失败，请检查设备存储空间" }
+        preferences.commitOrThrow("记录保存失败，请检查设备存储空间") {
+            putString(entriesKey(date), array.toString())
+        }
     }
 
     fun nutritionHistory(endDate: LocalDate, days: Int): List<DailyNutritionPoint> {
@@ -76,50 +83,75 @@ class ShikeRepository(context: Context) {
 
     fun legacyMigrationComplete(): Boolean = preferences.getBoolean(KEY_LEGACY_MIGRATED, false)
 
-    fun importLegacyData(raw: String): Int {
-        if (legacyMigrationComplete()) return 0
+    fun legacyDataNeedsAttention(): Boolean = !legacyMigrationComplete() ||
+        !preferences.getBoolean(KEY_LEGACY_KEYS_CLEARED, false)
+
+    fun markLegacyKeysCleared() {
+        preferences.commitOrThrow("旧数据清理状态保存失败，请重试") {
+            putBoolean(KEY_LEGACY_KEYS_CLEARED, true)
+        }
+    }
+
+    fun importLegacyData(raw: String): Int = synchronized(preferences) {
+        val root = JSONObject(raw)
+        require(root.optInt("version") == 1 && root.has("settings") && root.has("goal")) {
+            "旧数据读取不完整，请重试"
+        }
+        val legacyKeys = root.getJSONObject("keys")
+        val logs = root.getJSONObject("logs")
+        if (legacyMigrationComplete()) {
+            if (legacyKeys.length() > 0) keyStore.retainLegacyKeys(legacyKeys.toString())
+            return@synchronized 0
+        }
         var importedEntries = 0
-        runCatching {
-            val root = JSONObject(raw)
-            root.optJSONObject("settings")?.let { settingsJson ->
-                val importedSettings = AppSettings(
-                    providerId = settingsJson.optString("provider", AppSettings().providerId).safeProviderId(),
-                    model = settingsJson.optString("model").take(200),
-                    customBaseUrl = settingsJson.optString("customBaseUrl").take(2048),
-                    customModel = settingsJson.optString("customModel").take(200),
-                    dynamicColorEnabled = false,
-                )
-                val importedGoal = root.optString("goal").toIntOrNull()?.coerceIn(1, MAX_GOAL) ?: DEFAULT_GOAL
-                val importedKey = root.optJSONObject("keys")?.optString(importedSettings.providerId).orEmpty()
-                saveSettings(importedSettings, importedGoal, importedKey)
-                root.optJSONObject("keys")?.let { keys ->
-                    ProviderCatalog.all.forEach { provider ->
-                        keys.optString(provider.id).takeIf(String::isNotBlank)?.let { keyStore.put(provider.id, it) }
-                    }
+        val migratedLogs = linkedMapOf<LocalDate, List<MealEntry>>()
+        val logKeys = logs.keys()
+        while (logKeys.hasNext()) {
+            val rawKey = logKeys.next()
+            val date = LocalDate.parse(rawKey.removePrefix("eat-log-"))
+            val array = logs.getJSONArray(rawKey)
+            if (entries(date).isNotEmpty()) continue
+            val imported = buildList {
+                for (index in 0 until array.length()) {
+                    array.getJSONObject(index).toMealEntry()?.let(::add)
                 }
             }
-            val logs = root.optJSONObject("logs")
-            if (logs != null) {
-                val keys = logs.keys()
-                while (keys.hasNext()) {
-                    val rawKey = keys.next()
-                    val date = runCatching { LocalDate.parse(rawKey.removePrefix("eat-log-")) }.getOrNull() ?: continue
-                    if (entries(date).isNotEmpty()) continue
-                    val array = logs.optJSONArray(rawKey) ?: continue
-                    val imported = buildList {
-                        for (index in 0 until array.length()) {
-                            array.optJSONObject(index)?.toMealEntry()?.let(::add)
-                        }
-                    }
-                    if (imported.isNotEmpty()) {
-                        saveEntries(date, imported)
-                        importedEntries += imported.size
-                    }
-                }
+            if (imported.isNotEmpty()) {
+                migratedLogs[date] = imported
+                importedEntries += imported.size
             }
         }
-        preferences.edit { putBoolean(KEY_LEGACY_MIGRATED, true) }
-        return importedEntries
+        val importedSettings = if (root.isNull("settings")) null else {
+            val settingsJson = root.getJSONObject("settings")
+            AppSettings(
+                providerId = settingsJson.optString("provider", AppSettings().providerId).safeProviderId(),
+                model = settingsJson.optString("model").take(200),
+                customBaseUrl = settingsJson.optString("customBaseUrl").take(2048),
+                customModel = settingsJson.optString("customModel").take(200),
+                dynamicColorEnabled = false,
+            )
+        }
+        ProviderCatalog.all.forEach { provider ->
+            legacyKeys.optString(provider.id).takeIf(String::isNotBlank)?.let { keyStore.put(provider.id, it) }
+        }
+        if (legacyKeys.length() > 0) keyStore.retainLegacyKeys(legacyKeys.toString())
+        preferences.commitOrThrow("旧数据迁移保存失败，请检查设备存储空间") {
+            importedSettings?.let { settings ->
+                putString(KEY_SETTINGS, JSONObject()
+                    .put("provider", settings.providerId)
+                    .put("model", settings.model)
+                    .put("customBaseUrl", settings.customBaseUrl)
+                    .put("customModel", settings.customModel)
+                    .put("dynamicColorEnabled", settings.dynamicColorEnabled)
+                    .toString())
+            }
+            root.optString("goal").toIntOrNull()?.let { putInt(KEY_GOAL, it.coerceIn(1, MAX_GOAL)) }
+            migratedLogs.forEach { (date, entries) ->
+                putString(entriesKey(date), JSONArray().apply { entries.forEach { put(it.toJson()) } }.toString())
+            }
+            putBoolean(KEY_LEGACY_MIGRATED, true)
+        }
+        importedEntries
     }
 
     private fun entriesKey(date: LocalDate) = "entries_$date"
@@ -127,10 +159,10 @@ class ShikeRepository(context: Context) {
     private fun MealEntry.toJson() = JSONObject()
         .put("id", id)
         .put("name", name)
-        .put("calories", calories)
-        .put("protein", proteinGrams)
-        .put("carbs", carbsGrams)
-        .put("fat", fatGrams)
+        .put("calories", calories.safeCalorieValue())
+        .put("protein", proteinGrams.safeNutritionValue())
+        .put("carbs", carbsGrams.safeNutritionValue())
+        .put("fat", fatGrams.safeNutritionValue())
         .put("time", time)
         .put("note", note)
         .put("thumb", thumbnailBase64)
@@ -144,7 +176,7 @@ class ShikeRepository(context: Context) {
         return MealEntry(
             id = optString("id").takeIf(String::isNotBlank) ?: UUID.randomUUID().toString(),
             name = name,
-            calories = optDouble("calories", 0.0).safeNutritionValue().toInt(),
+            calories = optDouble("calories", 0.0).safeCalorieValue(),
             proteinGrams = optDouble("protein", 0.0).safeNutritionValue(),
             carbsGrams = optDouble("carbs", 0.0).safeNutritionValue(),
             fatGrams = optDouble("fat", 0.0).safeNutritionValue(),
@@ -167,5 +199,29 @@ class ShikeRepository(context: Context) {
         private const val KEY_SETTINGS = "settings"
         private const val KEY_GOAL = "goal"
         private const val KEY_LEGACY_MIGRATED = "legacy_webview_migrated_v1"
+        private const val KEY_LEGACY_KEYS_CLEARED = "legacy_webview_keys_cleared_v1"
+    }
+}
+
+/** A failed commit still changes SharedPreferences memory; restore it before allowing a retry. */
+internal fun SharedPreferences.commitOrThrow(
+    message: String,
+    changes: SharedPreferences.Editor.() -> Unit,
+) = synchronized(this) {
+    val previous = all.toMap()
+    if (!edit().apply(changes).commit()) {
+        edit().clear().apply {
+            previous.forEach { (key, value) ->
+                when (value) {
+                    is String -> putString(key, value)
+                    is Int -> putInt(key, value)
+                    is Long -> putLong(key, value)
+                    is Float -> putFloat(key, value)
+                    is Boolean -> putBoolean(key, value)
+                    is Set<*> -> putStringSet(key, value.filterIsInstance<String>().toSet())
+                }
+            }
+        }.commit()
+        throw IllegalStateException(message)
     }
 }

@@ -1,0 +1,27 @@
+name: Release Policy CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/scripts/**"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/release-policy-ci.yml"
+  pull_request:
+    paths:
+      - ".github/scripts/**"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/release-policy-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test release ordering and immutable assets
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'

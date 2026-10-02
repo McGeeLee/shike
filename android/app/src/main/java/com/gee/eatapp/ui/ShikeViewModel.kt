@@ -21,6 +21,7 @@ import com.gee.eatapp.data.ShikeRepository
 import com.gee.eatapp.data.effectiveModel
 import com.gee.eatapp.data.normalizeBaseUrl
 import com.gee.eatapp.image.ImageProcessor
+import com.gee.eatapp.image.CapturedPhotoStore
 import com.gee.eatapp.image.PreparedImage
 import com.gee.eatapp.network.FoodAnalysisClient
 import com.gee.eatapp.update.AppRelease
@@ -28,8 +29,12 @@ import com.gee.eatapp.update.AppUpdateClient
 import com.gee.eatapp.update.UpdateCheckStore
 import com.gee.eatapp.update.isNewerVersion
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -82,7 +87,13 @@ data class ShikeUiState(
     val summary: DailySummary get() = DailySummary.from(entries)
 }
 
-class ShikeViewModel(application: Application) : AndroidViewModel(application) {
+class ShikeViewModel @JvmOverloads constructor(
+    application: Application,
+    private val modelDiscovery: suspend (AppSettings, String) -> List<String> = FoodAnalysisClient()::listAvailableModels,
+    private val releaseDownloader: suspend (Application, AppRelease) -> File = { app, release ->
+        AppUpdateClient().downloadRelease(app, release)
+    },
+) : AndroidViewModel(application) {
     private val repository = ShikeRepository(application)
     private val analysisClient = FoodAnalysisClient()
     private val updateClient = AppUpdateClient()
@@ -91,6 +102,9 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
     private var imageJob: Job? = null
     private var analysisJob: Job? = null
     private var updateDownloadJob: Job? = null
+    private var modelDiscoveryJob: Job? = null
+    private var modelDiscoveryRequestId = 0L
+    private var updateDownloadRequestId = 0L
     private var eventCounter = 0L
 
     var uiState by mutableStateOf(loadState(LocalDate.now()))
@@ -116,20 +130,31 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
         if (uiState.imageSourceRequestId == requestId) uiState = uiState.copy(imageSourceRequestId = 0)
     }
 
-    fun prepareImage(uri: Uri) {
+    fun prepareImage(uri: Uri, deleteCameraSource: Boolean = false) {
         imageJob?.cancel()
         analysisJob?.cancel()
         uiState = uiState.copy(mealPanel = MealPanel.Preparing)
         imageJob = viewModelScope.launch {
-            runCatching { imageProcessor.prepare(uri) }
-                .onSuccess { uiState = uiState.copy(mealPanel = MealPanel.Preview(it)) }
-                .onFailure { error ->
-                    if (error is CancellationException) throw error
-                    uiState = uiState.copy(
-                        mealPanel = MealPanel.Error(error.message ?: "图片读取失败"),
-                    )
+            try {
+                runCatching { imageProcessor.prepare(uri) }
+                    .onSuccess { uiState = uiState.copy(mealPanel = MealPanel.Preview(it)) }
+                    .onFailure { error ->
+                        if (error is CancellationException) throw error
+                        uiState = uiState.copy(mealPanel = MealPanel.Error(error.message ?: "图片读取失败"))
+                    }
+            } finally {
+                if (deleteCameraSource) withContext(NonCancellable + Dispatchers.IO) {
+                    discardCameraImage(uri)
                 }
+            }
         }
+    }
+
+    fun discardCameraImage(uri: Uri) {
+        val application = getApplication<Application>()
+        if (uri.scheme == "content" && uri.authority == "${application.packageName}.fileprovider" &&
+            uri.pathSegments.size == 2 && uri.pathSegments.first() == "captured_images"
+        ) CapturedPhotoStore(application.cacheDir).delete(uri.pathSegments.last())
     }
 
     fun updateMealNote(note: String) {
@@ -262,6 +287,7 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openSettings() {
+        invalidateModelDiscovery()
         val settings = repository.settings()
         val selectedModel = settings.effectiveModel()
         uiState = uiState.copy(
@@ -278,12 +304,15 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun dismissSettings() {
+        invalidateModelDiscovery()
         uiState = uiState.copy(settingsDraft = null)
     }
 
     fun selectProvider(providerId: String) {
         val draft = uiState.settingsDraft ?: return
         if (ProviderCatalog.find(providerId) == null) return
+        if (draft.providerId == providerId) return
+        invalidateModelDiscovery()
         val selections = draft.selections + (draft.providerId to draft.selectedModel)
         val selected = selections[providerId]
             ?: draft.discoveredModels[providerId]?.firstOrNull()
@@ -297,6 +326,7 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
                 statusMessage = "",
                 statusKind = ConnectionStatusKind.IDLE,
                 errorMessage = "",
+                isLoading = false,
             ),
         )
     }
@@ -309,9 +339,17 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun updateCustomBaseUrl(value: String) = updateDraft { it.copy(customBaseUrl = value.take(2048), errorMessage = "") }
+    fun updateCustomBaseUrl(value: String) {
+        invalidateModelDiscovery()
+        updateDraft {
+            it.copy(customBaseUrl = value.take(2048), errorMessage = "", discoveredModels = it.discoveredModels - "custom")
+        }
+    }
 
-    fun updateApiKey(value: String) = updateDraft { it.copy(apiKey = value, errorMessage = "") }
+    fun updateApiKey(value: String) {
+        invalidateModelDiscovery()
+        updateDraft { it.copy(apiKey = value, errorMessage = "", discoveredModels = it.discoveredModels - it.providerId) }
+    }
 
     fun updateGoal(value: String) = updateDraft {
         it.copy(goalInput = value.filter(Char::isDigit).take(6), errorMessage = "")
@@ -382,7 +420,7 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun dismissUpdate() {
-        updateDownloadJob?.cancel()
+        invalidateUpdateDownload()
         uiState.downloadedUpdatePath?.let { File(it).delete() }
         uiState = uiState.copy(
             availableUpdate = null,
@@ -394,44 +432,55 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
     fun downloadUpdate() {
         val release = uiState.availableUpdate ?: return
         if (uiState.isDownloadingUpdate) return
-        updateDownloadJob?.cancel()
+        invalidateUpdateDownload()
+        val requestId = updateDownloadRequestId
         uiState = uiState.copy(
             isDownloadingUpdate = true,
             downloadedUpdatePath = null,
             updateStatusMessage = "正在下载并校验更新包…",
         )
-        updateDownloadJob = viewModelScope.launch {
+        updateDownloadJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
-                val apk = updateClient.downloadRelease(getApplication(), release)
+                val apk = releaseDownloader(getApplication(), release)
+                if (requestId != updateDownloadRequestId) {
+                    apk.delete()
+                    return@launch
+                }
                 uiState = uiState.copy(
                     isDownloadingUpdate = false,
                     downloadedUpdatePath = apk.absolutePath,
                     updateStatusMessage = "下载完成并已通过 SHA-256 校验",
                 )
             } catch (error: CancellationException) {
-                uiState = uiState.copy(
+                if (requestId == updateDownloadRequestId) uiState = uiState.copy(
                     isDownloadingUpdate = false,
                     updateStatusMessage = "已取消下载",
                 )
                 throw error
             } catch (error: Throwable) {
-                uiState = uiState.copy(
+                if (requestId == updateDownloadRequestId) uiState = uiState.copy(
                     isDownloadingUpdate = false,
                     updateStatusMessage = "下载失败：${error.message ?: "请稍后重试"}",
                 )
             } finally {
-                updateDownloadJob = null
+                if (requestId == updateDownloadRequestId) updateDownloadJob = null
             }
         }
+        updateDownloadJob?.start()
     }
 
     fun cancelUpdateDownload() {
-        updateDownloadJob?.cancel()
-        updateDownloadJob = null
+        invalidateUpdateDownload()
         uiState = uiState.copy(
             isDownloadingUpdate = false,
             updateStatusMessage = "已取消下载",
         )
+    }
+
+    private fun invalidateUpdateDownload() {
+        updateDownloadRequestId++
+        updateDownloadJob?.cancel()
+        updateDownloadJob = null
     }
 
     fun reportUpdateInstallError(message: String) {
@@ -442,6 +491,8 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
     fun discoverModels(connectionTest: Boolean) {
         val draft = uiState.settingsDraft ?: return
         val requestSettings = draft.toSettings()
+        invalidateModelDiscovery()
+        val requestId = modelDiscoveryRequestId
         updateDraft {
             it.copy(
                 isLoading = true,
@@ -450,41 +501,59 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
                 errorMessage = "",
             )
         }
-        viewModelScope.launch {
-            runCatching { analysisClient.listAvailableModels(requestSettings, draft.apiKey) }
-                .onSuccess { models ->
-                    val current = uiState.settingsDraft ?: return@onSuccess
-                    if (current.providerId != draft.providerId) return@onSuccess
-                    val provider = ProviderCatalog.find(current.providerId) ?: return@onSuccess
-                    val selected = current.selectedModel.takeIf(String::isNotBlank) ?: models.first()
-                    uiState = uiState.copy(
-                        settingsDraft = current.copy(
-                            selectedModel = selected,
-                            selections = current.selections + (current.providerId to selected),
-                            discoveredModels = current.discoveredModels + (current.providerId to models),
-                            isLoading = false,
-                            statusKind = ConnectionStatusKind.SUCCESS,
-                            statusMessage = if (provider.imageInputSupport == ImageInputSupport.UNSUPPORTED) {
-                                "连接成功，发现 ${models.size} 个模型；但这些模型当前不能接收食物照片。"
-                            } else {
-                                "${if (connectionTest) "连接成功" else "获取成功"}，发现 ${models.size} 个可选模型。"
-                            },
-                        ),
-                    )
+        modelDiscoveryJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                runCatching {
+                    modelDiscovery(requestSettings, draft.apiKey).also {
+                        check(it.isNotEmpty()) { "没有可用模型，请检查接口设置" }
+                    }
                 }
-                .onFailure { error ->
-                    if (error is CancellationException) throw error
-                    val current = uiState.settingsDraft ?: return@onFailure
-                    if (current.providerId != draft.providerId) return@onFailure
-                    uiState = uiState.copy(
-                        settingsDraft = current.copy(
-                            isLoading = false,
-                            statusKind = ConnectionStatusKind.ERROR,
-                            statusMessage = error.message ?: "无法获取模型，请检查接口设置",
-                        ),
-                    )
-                }
+                    .onSuccess { models ->
+                        if (requestId != modelDiscoveryRequestId) return@onSuccess
+                        val current = uiState.settingsDraft ?: return@onSuccess
+                        if (current.providerId != draft.providerId) return@onSuccess
+                        val provider = ProviderCatalog.find(current.providerId) ?: return@onSuccess
+                        val selected = current.selectedModel.takeIf(String::isNotBlank) ?: models.first()
+                        uiState = uiState.copy(
+                            settingsDraft = current.copy(
+                                selectedModel = selected,
+                                selections = current.selections + (current.providerId to selected),
+                                discoveredModels = current.discoveredModels + (current.providerId to models),
+                                isLoading = false,
+                                statusKind = ConnectionStatusKind.SUCCESS,
+                                statusMessage = if (provider.imageInputSupport == ImageInputSupport.UNSUPPORTED) {
+                                    "连接成功，发现 ${models.size} 个模型；但这些模型当前不能接收食物照片。"
+                                } else {
+                                    "${if (connectionTest) "连接成功" else "获取成功"}，发现 ${models.size} 个可选模型。"
+                                },
+                            ),
+                        )
+                    }
+                    .onFailure { error ->
+                        if (error is CancellationException) throw error
+                        if (requestId != modelDiscoveryRequestId) return@onFailure
+                        val current = uiState.settingsDraft ?: return@onFailure
+                        if (current.providerId != draft.providerId) return@onFailure
+                        uiState = uiState.copy(
+                            settingsDraft = current.copy(
+                                isLoading = false,
+                                statusKind = ConnectionStatusKind.ERROR,
+                                statusMessage = error.message ?: "无法获取模型，请检查接口设置",
+                            ),
+                        )
+                    }
+            } finally {
+                if (requestId == modelDiscoveryRequestId) modelDiscoveryJob = null
+            }
         }
+        modelDiscoveryJob?.start()
+    }
+
+    private fun invalidateModelDiscovery() {
+        modelDiscoveryRequestId++
+        modelDiscoveryJob?.cancel()
+        modelDiscoveryJob = null
+        updateDraft { it.copy(isLoading = false, statusMessage = "", statusKind = ConnectionStatusKind.IDLE) }
     }
 
     fun saveSettings() {
@@ -505,6 +574,7 @@ class ShikeViewModel(application: Application) : AndroidViewModel(application) {
                 if (it.providerId == "custom") it.copy(customBaseUrl = normalizeBaseUrl(it.customBaseUrl)) else it
             }
             repository.saveSettings(settings, goal, draft.apiKey)
+            invalidateModelDiscovery()
             uiState = uiState.copy(settings = settings, goal = goal, settingsDraft = null)
         }.onFailure { error ->
             updateDraft { it.copy(errorMessage = error.message ?: "设置保存失败") }

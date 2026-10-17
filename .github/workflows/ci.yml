@@ -28,10 +28,10 @@ jobs:
       SHIKE_VERSION_CODE: "${{ github.run_number }}"
     steps:
       - name: Check out source
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Set up JDK 25
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 25
@@ -39,6 +39,8 @@ jobs:
           cache-dependency-path: |
             android/**/*.gradle*
             android/gradle.properties
+            android/gradle/libs.versions.toml
+            android/gradle/gradle-daemon-jvm.properties
             android/gradle/wrapper/gradle-wrapper.properties
 
       - name: Set up Android SDK

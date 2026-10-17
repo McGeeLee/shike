@@ -22,6 +22,25 @@ class ShikeViewModelRequestTest {
     private fun onMain(action: () -> Unit) = instrumentation.runOnMainSync(action)
     private fun idle() = instrumentation.waitForIdleSync()
 
+    @Test fun refreshedApiListPreservesMissingSavedSelectionAndOffersOnlyReturnedIds() {
+        lateinit var model: ShikeViewModel
+        onMain {
+            model = ShikeViewModel(application, modelDiscovery = { _, _ -> listOf("new-api-model") })
+            model.openSettings()
+            model.selectProvider("mimo")
+            model.selectModel("previously-selected-model")
+            model.discoverModels(false)
+        }
+        idle()
+        onMain {
+            val draft = model.uiState.settingsDraft!!
+            assertEquals("previously-selected-model", draft.selectedModel)
+            assertEquals(listOf("new-api-model"), model.availableModels(draft).map { it.id })
+            assertTrue(draft.statusMessage.contains("原配置已保留"))
+            model.viewModelScope.cancel()
+        }
+    }
+
     @Test fun switchingProviderReleasesLoadingAndIgnoresOldCompletion() {
         val oldResponse = CompletableDeferred<List<String>>()
         lateinit var model: ShikeViewModel

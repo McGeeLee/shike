@@ -4,7 +4,6 @@ import com.gee.eatapp.data.AnalysisResult
 import com.gee.eatapp.data.ApiProtocol
 import com.gee.eatapp.data.AppSettings
 import com.gee.eatapp.data.Confidence
-import com.gee.eatapp.data.DEEPSEEK_VISION_MODEL
 import com.gee.eatapp.data.FoodItem
 import com.gee.eatapp.data.ImageInputSupport
 import com.gee.eatapp.data.MAX_MEAL_CALORIES
@@ -13,9 +12,9 @@ import com.gee.eatapp.data.ProviderCatalog
 import com.gee.eatapp.data.ProviderDefinition
 import com.gee.eatapp.data.effectiveModel
 import com.gee.eatapp.data.normalizeBaseUrl
-import com.gee.eatapp.data.normalizeModelIds
-import com.gee.eatapp.data.normalizeDeepSeekVisionModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -44,48 +43,12 @@ class FoodAnalysisClient {
                 ApiProtocol.GEMINI_GENERATE_CONTENT -> mapOf("x-goog-api-key" to apiKey.trim())
                 else -> mapOf("Authorization" to "Bearer ${apiKey.trim()}")
             }
-            val listUrl = if (provider.protocol == ApiProtocol.GEMINI_GENERATE_CONTENT) {
-                "$baseUrl/${provider.modelListPath}?pageSize=1000"
-            } else {
-                "$baseUrl/${provider.modelListPath}"
-            }
-            val response = request(listUrl, "GET", headers, null, MODEL_TIMEOUT_MS)
-            ensureSuccessful(response)
-            val payload = runCatching { JSONObject(response.body) }
-                .getOrElse { throw IllegalStateException("模型列表返回了无效数据") }
-            val source = payload.optJSONArray("data") ?: payload.optJSONArray("models") ?: JSONArray()
-            val values = buildList {
-                for (index in 0 until source.length()) {
-                    when (val item = source.opt(index)) {
-                        is String -> add(item)
-                        is JSONObject -> {
-                            if (!item.isSelectableModel(provider)) {
-                                continue
-                            }
-                            add(
-                                item.optString("id")
-                                    .ifBlank { item.optString("baseModelId") }
-                                    .ifBlank { item.optString("name").removePrefix("models/") },
-                            )
-                        }
-                    }
-                }
-            }
-            val normalized = normalizeModelIds(values)
-            val selectable = when (provider.id) {
-                "mimo" -> normalized.filter { it.equals("mimo-v2.5", ignoreCase = true) }
-                "deepseek" -> normalized.map(::normalizeDeepSeekVisionModel)
-                    .filter { it == DEEPSEEK_VISION_MODEL }.distinct()
-                else -> normalized
-            }
-            selectable.ifEmpty {
-                if (provider.id == "mimo" && normalized.isNotEmpty()) {
-                    throw IllegalStateException("连接成功，但未发现当前支持图片输入的 MiMo-V2.5 模型")
-                }
-                if (provider.id == "deepseek" && normalized.isNotEmpty()) {
-                    throw IllegalStateException("连接成功，但未发现 DeepSeek Flash 视觉模型")
-                }
-                throw IllegalStateException("连接成功，但该 API Key 没有返回可用模型")
+            discoverModelIds(provider) { cursor ->
+                currentCoroutineContext().ensureActive()
+                val response = request(modelListUrl(baseUrl, provider, cursor), "GET", headers, null, MODEL_TIMEOUT_MS)
+                ensureSuccessful(response)
+                runCatching { JSONObject(response.body) }
+                    .getOrElse { throw IllegalStateException("模型列表返回了无效数据") }
             }
         }
 
@@ -130,7 +93,7 @@ class FoodAnalysisClient {
                 apiKey.trim(),
                 imageBase64,
                 userText,
-                deepSeekVision = provider.id == "deepseek",
+                providerId = provider.id,
             )
             ApiProtocol.GEMINI_GENERATE_CONTENT -> requestGemini(
                 baseUrl,
@@ -156,20 +119,12 @@ class FoodAnalysisClient {
         ) {
             val retry = requestOpenAiCompatible(
                 baseUrl, model, apiKey.trim(), imageBase64, userText,
-                deepSeekVision = true, useJsonMode = false,
+                providerId = provider.id, useJsonMode = false,
             )
             ensureSuccessful(retry)
             val retryPayload = runCatching { JSONObject(retry.body) }
                 .getOrElse { throw IllegalStateException("模型返回了无效数据，请重试") }
             text = extractChatCompletionText(retryPayload)
-        }
-        if (text.isBlank() && provider.protocol == ApiProtocol.GEMINI_GENERATE_CONTENT) {
-            val reason = payload.optJSONObject("promptFeedback")?.optString("blockReason")
-                .orEmpty()
-                .ifBlank { payload.optJSONArray("candidates")?.optJSONObject(0)?.optString("finishReason").orEmpty() }
-            if (reason.isNotBlank() && reason != "STOP") {
-                throw IllegalStateException("Gemini 未返回结果（$reason），请更换照片或模型后重试")
-            }
         }
         if (text.isBlank()) throw IllegalStateException("模型没有返回识别结果，请重试")
         normalizeResult(parseJsonLoose(text))
@@ -184,7 +139,7 @@ class FoodAnalysisClient {
     ): HttpResponse {
         val body = JSONObject()
             .put("model", model)
-            .put("max_tokens", 2048)
+            .put("max_tokens", 8192)
             .put(
                 "output_config",
                 JSONObject().put(
@@ -325,22 +280,7 @@ class FoodAnalysisClient {
                         ),
                 ),
             )
-        val generationConfig = JSONObject().put("maxOutputTokens", 2048)
-        if (model.startsWith("gemini-3", ignoreCase = true)) {
-            generationConfig.put(
-                "responseFormat",
-                JSONObject().put(
-                    "text",
-                    JSONObject()
-                        .put("mimeType", "application/json")
-                        .put("schema", foodAnalysisSchema()),
-                ),
-            )
-        } else {
-            generationConfig
-                .put("responseMimeType", "application/json")
-                .put("responseJsonSchema", foodAnalysisSchema())
-        }
+        val generationConfig = geminiGenerationConfig()
         body.put("generationConfig", generationConfig)
         return request(
             "$baseUrl/models/${encodePathSegment(model)}:generateContent",
@@ -357,12 +297,12 @@ class FoodAnalysisClient {
         apiKey: String,
         imageBase64: String,
         userText: String,
-        deepSeekVision: Boolean,
+        providerId: String,
         useJsonMode: Boolean = true,
     ): HttpResponse {
         val imageUrl = JSONObject()
             .put("url", "data:image/jpeg;base64,$imageBase64")
-        if (deepSeekVision) imageUrl.put("detail", "high")
+        if (providerId == "deepseek") imageUrl.put("detail", "high")
         val body = JSONObject()
             .put("model", model)
             .put(
@@ -395,8 +335,10 @@ class FoodAnalysisClient {
                             ),
                     ),
             )
-        if (deepSeekVision) {
-            configureDeepSeekVisionRequest(body, useJsonMode)
+        when (providerId) {
+            "deepseek" -> configureDeepSeekVisionRequest(body, useJsonMode)
+            "mimo" -> configureMimoVisionRequest(body)
+            "kimi" -> body.put("response_format", JSONObject().put("type", "json_object"))
         }
         return request(
             "$baseUrl/chat/completions",
@@ -533,44 +475,6 @@ class FoodAnalysisClient {
         )
     }
 
-    private fun extractClaudeText(payload: JSONObject): String {
-        val content = payload.optJSONArray("content") ?: JSONArray()
-        return (0 until content.length())
-            .mapNotNull { content.optJSONObject(it) }
-            .firstOrNull { it.optString("type") == "text" }
-            ?.optString("text")
-            .orEmpty()
-    }
-
-    private fun extractResponsesText(payload: JSONObject): String {
-        payload.optString("output_text").takeIf(String::isNotBlank)?.let { return it }
-        val output = payload.optJSONArray("output") ?: JSONArray()
-        return buildString {
-            for (outputIndex in 0 until output.length()) {
-                val content = output.optJSONObject(outputIndex)?.optJSONArray("content") ?: continue
-                for (contentIndex in 0 until content.length()) {
-                    val part = content.optJSONObject(contentIndex) ?: continue
-                    if (part.optString("type") == "output_text" || part.has("text")) {
-                        append(part.optString("text"))
-                    }
-                }
-            }
-        }
-    }
-
-    private fun extractGeminiText(payload: JSONObject): String {
-        val parts = payload.optJSONArray("candidates")
-            ?.optJSONObject(0)
-            ?.optJSONObject("content")
-            ?.optJSONArray("parts")
-            ?: return ""
-        return buildString {
-            for (index in 0 until parts.length()) {
-                append(parts.optJSONObject(index)?.optString("text").orEmpty())
-            }
-        }
-    }
-
     private fun boundedNumber(value: Any?, maximum: Double): Double {
         val number = when (value) {
             is Number -> value.toDouble()
@@ -587,30 +491,6 @@ class FoodAnalysisClient {
         normalizeBaseUrl(
             if (provider.id == "custom") settings.customBaseUrl else provider.baseUrl.orEmpty(),
         )
-
-    private fun JSONObject.isSelectableModel(provider: ProviderDefinition): Boolean = when (provider.id) {
-        "gemini" -> supportsGeminiGenerateContent()
-        "kimi" -> optBoolean("supports_image_in")
-        "xai" -> optJSONArray("input_modalities").containsString("image")
-        "mistral" -> optJSONObject("capabilities")?.optBoolean("vision") == true
-        "openrouter" -> optJSONObject("architecture")
-            ?.optJSONArray("input_modalities")
-            .containsString("image")
-        else -> true
-    }
-
-    private fun JSONObject.supportsGeminiGenerateContent(): Boolean {
-        val methods = optJSONArray("supportedGenerationMethods") ?: optJSONArray("supportedActions")
-        return methods == null || methods.containsString("generateContent")
-    }
-
-    private fun JSONArray?.containsString(value: String): Boolean {
-        if (this == null) return false
-        for (index in 0 until length()) {
-            if (optString(index).equals(value, ignoreCase = true)) return true
-        }
-        return false
-    }
 
     private fun encodePathSegment(value: String): String =
         URLEncoder.encode(value, StandardCharsets.UTF_8.name()).replace("+", "%20")
@@ -719,8 +599,10 @@ internal fun extractChatCompletionText(payload: JSONObject): String {
     val choice = payload.optJSONArray("choices")?.optJSONObject(0) ?: return ""
     val message = choice.optJSONObject("message")
     when (choice.optString("finish_reason")) {
+        "", "stop" -> Unit
         "length" -> throw IllegalStateException("模型输出达到长度限制，未完成识别；请减少照片中的食物数量后重试")
         "content_filter" -> throw IllegalStateException("模型服务拦截了这次识别，请更换照片后重试")
+        else -> throw IllegalStateException("模型未完成识别，请稍后重试或更换模型")
     }
     if (!(message?.opt("refusal") as? String).isNullOrBlank()) {
         throw IllegalStateException("模型拒绝了这次识别，请更换照片后重试")
@@ -734,6 +616,7 @@ internal fun extractChatCompletionText(payload: JSONObject): String {
                     is JSONObject -> if (part.optString("type") in listOf("", "text", "output_text")) {
                         append(part.optString("text"))
                     }
+                    else -> Unit
                 }
             }
         }

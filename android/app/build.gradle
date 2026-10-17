@@ -1,5 +1,7 @@
-apply plugin: 'com.android.application'
-apply plugin: 'org.jetbrains.kotlin.plugin.compose'
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.compose)
+}
 
 def releaseSigningPropertiesFile = rootProject.file('release-signing.properties')
 def releaseSigningProperties = new Properties()
@@ -75,29 +77,29 @@ android {
 }
 
 dependencies {
-    def versions = rootProject.ext
-    def composeBom = platform('androidx.compose:compose-bom:2026.08.00')
+    def composeBom = platform(libs.androidx.compose.bom)
     implementation composeBom
     androidTestImplementation composeBom
 
-    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.3'
+    coreLibraryDesugaring libs.desugar.jdk.libs
 
-    implementation "androidx.activity:activity-compose:${versions.androidxActivityVersion}"
-    implementation "androidx.core:core-ktx:${versions.androidxCoreVersion}"
-    implementation "androidx.core:core-splashscreen:${versions.coreSplashScreenVersion}"
-    implementation 'androidx.compose.material3:material3'
-    implementation 'androidx.compose.material:material-icons-extended'
-    implementation 'androidx.compose.ui:ui-tooling-preview'
-    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.10.0'
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0'
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.10.0'
-    implementation 'androidx.exifinterface:exifinterface:1.4.2'
-    implementation 'com.google.android.material:material:1.14.0'
+    implementation libs.androidx.activity.compose
+    implementation libs.androidx.core
+    implementation libs.androidx.core.splashscreen
+    implementation libs.androidx.compose.material3
+    implementation libs.androidx.compose.material.icons.extended
+    implementation libs.androidx.compose.ui.tooling.preview
+    implementation libs.androidx.lifecycle.runtime.compose
+    implementation libs.androidx.lifecycle.viewmodel.compose
+    implementation libs.androidx.lifecycle.viewmodel
+    implementation libs.androidx.exifinterface
+    implementation libs.material
 
-    debugImplementation 'androidx.compose.ui:ui-tooling'
-    debugImplementation 'androidx.compose.ui:ui-test-manifest'
-    testImplementation "junit:junit:${versions.junitVersion}"
-    androidTestImplementation "androidx.test.ext:junit:${versions.androidxJunitVersion}"
-    androidTestImplementation "androidx.test.espresso:espresso-core:${versions.androidxEspressoCoreVersion}"
-    androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
+    debugImplementation libs.androidx.compose.ui.tooling
+    debugImplementation libs.androidx.compose.ui.test.manifest
+    testImplementation libs.junit
+    testImplementation libs.json
+    androidTestImplementation libs.androidx.test.ext.junit
+    androidTestImplementation libs.androidx.test.espresso.core
+    androidTestImplementation libs.androidx.compose.ui.test.junit4
 }

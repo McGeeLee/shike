@@ -524,7 +524,8 @@ class ShikeViewModel @JvmOverloads constructor(
                                 statusMessage = if (provider.imageInputSupport == ImageInputSupport.UNSUPPORTED) {
                                     "连接成功，发现 ${models.size} 个模型；但这些模型当前不能接收食物照片。"
                                 } else {
-                                    "${if (connectionTest) "连接成功" else "获取成功"}，发现 ${models.size} 个可选模型。"
+                                    "${if (connectionTest) "连接成功" else "获取成功"}，发现 ${models.size} 个可选模型。" +
+                                        if (selected !in models) "当前模型未出现在本次列表中，请核对或重新选择；原配置已保留。" else ""
                                 },
                             ),
                         )

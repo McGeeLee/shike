@@ -1143,7 +1143,7 @@ internal fun SettingsSheet(
                 modifier = Modifier.testTag("modelField"),
             )
             Text(
-                "实时获取模型，或填写服务商提供的视觉模型 ID。新模型无需等待 App 更新。",
+                "模型列表仅来自服务商 API；未提供能力信息的型号需自行确认支持图片。也可手动填写视觉模型 ID。",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )

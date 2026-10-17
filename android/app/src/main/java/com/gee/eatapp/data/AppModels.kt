@@ -5,17 +5,10 @@ import java.time.LocalDate
 import java.util.Locale
 import kotlin.math.roundToInt
 
-const val DEEPSEEK_VISION_MODEL = "deepseek-flash"
-
 // Bounds apply to a single saved meal. Aggregate statistics use a separate limit.
 internal const val MAX_MEAL_CALORIES = 1_000_000
 internal const val MAX_NUTRITION_GRAMS = 100_000.0
 private const val MAX_TOTAL_NUTRITION_GRAMS = 1_000_000_000.0
-
-internal fun normalizeDeepSeekVisionModel(model: String): String = when (model.trim().lowercase(Locale.ROOT)) {
-    "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", DEEPSEEK_VISION_MODEL -> DEEPSEEK_VISION_MODEL
-    else -> model.trim()
-}
 
 enum class ApiProtocol {
     ANTHROPIC_MESSAGES,
@@ -70,14 +63,14 @@ object ProviderCatalog {
             name = "Kimi (Moonshot AI)",
             protocol = ApiProtocol.OPENAI_CHAT_COMPLETIONS,
             baseUrl = "https://api.moonshot.ai/v1",
-            guidance = "使用 Kimi 官方 Chat Completions；模型发现只保留 supports_image_in=true 的型号。",
+            guidance = "使用 Kimi 官方 Chat Completions；模型发现按 API 返回的图片能力筛选。",
         ),
         ProviderDefinition(
             id = "xai",
             name = "Grok (xAI)",
             protocol = ApiProtocol.OPENAI_RESPONSES,
             baseUrl = "https://api.x.ai/v1",
-            guidance = "使用 xAI 原生 Responses API；模型发现只保留支持 image 输入的语言模型。",
+            guidance = "使用 xAI 原生 Responses API；模型发现按 API 返回的图片输入和文本输出能力筛选。",
             strictStructuredOutput = true,
             modelListPath = "language-models",
         ),
@@ -86,7 +79,7 @@ object ProviderCatalog {
             name = "Mistral AI",
             protocol = ApiProtocol.OPENAI_CHAT_COMPLETIONS,
             baseUrl = "https://api.mistral.ai/v1",
-            guidance = "使用 Mistral 原生 Chat Completions；模型发现只保留 capabilities.vision=true 的型号。",
+            guidance = "使用 Mistral 原生 Chat Completions；模型发现按 API 返回的 vision 能力筛选。",
         ),
         ProviderDefinition(
             id = "qwen",
@@ -102,7 +95,7 @@ object ProviderCatalog {
             protocol = ApiProtocol.OPENAI_CHAT_COMPLETIONS,
             baseUrl = "https://open.bigmodel.cn/api/paas/v4",
             imageInputSupport = ImageInputSupport.MODEL_DEPENDENT,
-            guidance = "使用智谱官方 OpenAI 兼容入口；请选择 GLM-4V 等视觉模型。",
+            guidance = "使用智谱官方 OpenAI 兼容入口；请选择支持图片输入的模型。",
         ),
         ProviderDefinition(
             id = "volcengine",
@@ -117,14 +110,16 @@ object ProviderCatalog {
             name = "Xiaomi MiMo",
             protocol = ApiProtocol.OPENAI_CHAT_COMPLETIONS,
             baseUrl = "https://api.xiaomimimo.com/v1",
-            guidance = "使用 MiMo 官方 OpenAI API；当前仅 MiMo-V2.5 接受图片输入。",
+            imageInputSupport = ImageInputSupport.MODEL_DEPENDENT,
+            guidance = "使用 MiMo 官方 OpenAI API；模型从 API 实时获取，需确认所选型号支持图片输入。",
         ),
         ProviderDefinition(
             id = "deepseek",
             name = "DeepSeek",
             protocol = ApiProtocol.OPENAI_CHAT_COMPLETIONS,
             baseUrl = "https://api.deepseek.com",
-            guidance = "模型列表通过 DeepSeek 官方 /models 接口获取，并只保留支持 image_url 的视觉模型。",
+            imageInputSupport = ImageInputSupport.MODEL_DEPENDENT,
+            guidance = "模型列表通过 DeepSeek 官方 /models 接口获取；未提供能力元数据时需确认所选型号支持图片输入。",
         ),
         ProviderDefinition(
             id = "openrouter",
@@ -166,15 +161,7 @@ data class AppSettings(
 fun AppSettings.effectiveModel(): String {
     if (providerId == "custom") return customModel.trim()
     if (ProviderCatalog.find(providerId) == null) return ""
-    val selected = model.trim().take(200)
-    return if (
-        providerId == "deepseek" &&
-        (selected == "deepseek-v4-pro")
-    ) {
-        DEEPSEEK_VISION_MODEL
-    } else {
-        if (providerId == "deepseek") normalizeDeepSeekVisionModel(selected) else selected
-    }
+    return model.trim().take(200)
 }
 
 fun normalizeBaseUrl(value: String): String {
@@ -197,7 +184,6 @@ fun normalizeModelIds(values: List<String>): List<String> = values
     .filter(String::isNotEmpty)
     .distinct()
     .sortedWith(String.CASE_INSENSITIVE_ORDER)
-    .take(500)
 
 data class FoodItem(
     val name: String,

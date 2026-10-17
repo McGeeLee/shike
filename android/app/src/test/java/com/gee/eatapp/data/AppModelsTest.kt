@@ -27,12 +27,12 @@ class AppModelsTest {
     }
 
     @Test
-    fun modelSelectionUsesApiSelectionAndMigratesLegacyDeepSeekModels() {
+    fun modelSelectionPreservesApiIdsAndCustomConfiguration() {
         assertEquals("", AppSettings(providerId = "openai").effectiveModel())
         assertEquals("gpt-5.1", AppSettings(providerId = "openai", model = " gpt-5.1 ").effectiveModel())
         assertEquals("", AppSettings(providerId = "deepseek").effectiveModel())
         assertEquals(
-            DEEPSEEK_VISION_MODEL,
+            "deepseek-v4-flash",
             AppSettings(providerId = "deepseek", model = "deepseek-v4-flash").effectiveModel(),
         )
         assertEquals(
@@ -42,14 +42,12 @@ class AppModelsTest {
     }
 
     @Test
-    fun deepSeekFlashAliasesUseCurrentVisionModel() {
-        listOf("deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp").forEach { alias ->
-            assertEquals("deepseek-flash", AppSettings(providerId = "deepseek", model = alias).effectiveModel())
-            assertEquals("deepseek-flash", normalizeDeepSeekVisionModel(alias))
+    fun savedModelIdsAreNeverSilentlyReplacedDuringUpgrade() {
+        listOf("deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro", "deepseek-future").forEach { id ->
+            assertEquals(id, AppSettings(providerId = "deepseek", model = id).effectiveModel())
         }
-        assertEquals("deepseek-v4-pro", normalizeDeepSeekVisionModel("deepseek-v4-pro"))
-        assertEquals("deepseek-future", AppSettings(providerId = "deepseek", model = "deepseek-future").effectiveModel())
-        assertEquals("deepseek-v4-flash-vision-exp", AppSettings(providerId = "custom", customModel = "deepseek-v4-flash-vision-exp").effectiveModel())
+        assertEquals("mimo-v2.5", AppSettings(providerId = "mimo", model = "mimo-v2.5").effectiveModel())
+        assertEquals("future/model", AppSettings(providerId = "custom", customModel = "future/model").effectiveModel())
     }
 
     @Test
@@ -173,7 +171,7 @@ class AppModelsTest {
         assertEquals(ApiProtocol.OPENAI_RESPONSES, ProviderCatalog.find("xai")?.protocol)
         assertEquals("language-models", ProviderCatalog.find("xai")?.modelListPath)
         val deepSeek = ProviderCatalog.find("deepseek")
-        assertEquals(ImageInputSupport.SUPPORTED, deepSeek?.imageInputSupport)
+        assertEquals(ImageInputSupport.MODEL_DEPENDENT, deepSeek?.imageInputSupport)
         assertEquals("models", deepSeek?.modelListPath)
         assertTrue(ProviderCatalog.find("openrouter")?.modelListPath?.contains("input_modalities=image") == true)
     }

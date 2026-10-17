@@ -19,6 +19,21 @@ class ShikeRepositoryMigrationTest {
 
     @After fun cleanUp() { preferences.edit().clear().commit() }
 
+    @Test fun legacyModelConfigurationKeepsItsIdCredentialsAndMealsAfterUpgrade() {
+        val repository = ShikeRepository(preferences, keyStore)
+        val legacy = JSONObject(payload())
+            .put("settings", JSONObject().put("provider", "deepseek").put("model", "deepseek-v4-pro"))
+            .put("keys", JSONObject().put("deepseek", "old-key"))
+        assertEquals(1, repository.importLegacyData(legacy.toString()))
+        assertEquals("deepseek-v4-pro", repository.settings().model)
+        assertEquals("deepseek-v4-pro", repository.settings().effectiveModel())
+        assertEquals("old-key", repository.apiKey("deepseek"))
+        assertEquals(1800, repository.goal())
+        assertEquals("米饭", repository.entries(date).single().name)
+        assertEquals(0, repository.importLegacyData(legacy.toString()))
+        assertEquals(1, repository.entries(date).size)
+    }
+
     @Test fun malformedExportDoesNotMarkMigrationComplete() {
         val repository = ShikeRepository(preferences, keyStore)
         assertThrows(Exception::class.java) { repository.importLegacyData("{invalid") }

@@ -29,8 +29,8 @@
 - 在“统计”页切换近 7 天/近 30 天，查看记录天数、餐次数、总摄入、日均摄入和热量趋势；
 - 支持 Claude、OpenAI、Gemini、Kimi、Grok、Mistral、通义千问、智谱 GLM、火山方舟、MiMo、DeepSeek，以及 OpenRouter、硅基流动和自定义兼容接口；
 - 原生协议优先：Claude Messages、OpenAI/xAI/方舟 Responses、Gemini generateContent；其余使用厂商官方兼容协议；
-- 所有服务商的模型列表都从对应 API 实时获取，不使用本地预置型号；有能力元数据时只展示可接收图片的模型；
-- DeepSeek 使用 `deepseek-flash`，通过官方 Chat Completions 接口发送高细节 Base64 图片，显式关闭思考模式、保留 8192 个输出 token 并启用 JSON Output；
+- 所有服务商的模型列表都从对应 API 实时获取，不使用本地预置型号或固定型号白名单；按图片输入和文本输出能力过滤，能力未知时提示用户确认；
+- DeepSeek、MiMo 的新模型直接使用 API 返回的 ID；识别请求显式关闭可选思考模式、保留 8192 个输出 token 并启用 JSON Output；
 - 提示词以可见证据、份量依据、项目合计一致性和不可信用户备注隔离为核心，减少臆测与提示词注入；
 - 长按桌面图标可直接“拍照记餐”或打开“模型设置”；
 - 内置完整“食刻”Material 3 品牌色方案，并可在设置中选择是否跟随系统壁纸动态配色（默认关闭）；
@@ -57,18 +57,24 @@
 
 | 服务商 | 推理协议 | 模型发现与视觉策略 |
 | --- | --- | --- |
-| Claude | Anthropic Messages | 从 `/v1/models` 获取 |
+| Claude | Anthropic Messages | 从 `/v1/models` 分页获取，读取 `capabilities.image_input` |
 | OpenAI | Responses API | 从 `/v1/models` 获取，选择支持图片的模型 |
-| Gemini | `generateContent` | 使用原生 `models.list` 并过滤生成能力 |
-| Kimi | Chat Completions | 从 `/v1/models` 获取并过滤 `supports_image_in=true` |
+| Gemini | `generateContent` | 使用原生 `models.list` 分页获取并过滤生成能力，保留完整版本 ID |
+| Kimi | Chat Completions | 从 `/v1/models` 获取，按 `supports_image_in` 筛选 |
 | Grok | Responses API | 从 `/v1/language-models` 获取并过滤图片输入能力 |
-| Mistral | Chat Completions | 从 `/v1/models` 获取并过滤 `capabilities.vision=true` |
+| Mistral | Chat Completions | 从 `/v1/models` 获取，按 `capabilities.vision` 筛选 |
 | 通义千问、智谱 GLM、硅基流动 | OpenAI 兼容 Chat Completions | 从各自 `/models` 获取，选择 VL/VLM 型号 |
 | 火山引擎方舟 | Responses API | 从 `/api/v3/models` 获取，选择已开通视觉能力的模型或接入点 |
-| Xiaomi MiMo | Chat Completions | 从 `/v1/models` 获取并只保留 `mimo-v2.5` |
-| DeepSeek | Chat Completions | 从 `/models` 获取并只保留 `deepseek-flash` |
+| Xiaomi MiMo | Chat Completions | 从 `/v1/models` 获取；能力字段缺失时保留 API 型号并提示确认 |
+| DeepSeek | Chat Completions | 从 `/models` 获取，按 `input_modalities` / `output_modalities` 筛选 |
 | OpenRouter | Chat Completions | 使用带 image/text 模态筛选的 Models API |
 | 自定义服务 | OpenAI 兼容 Chat Completions | 从 `{baseUrl}/models` 获取，接口与模型须支持 `image_url` |
+
+## 模型配置升级
+
+升级保留已保存的服务商、模型 ID、API Key 和饮食记录，不把旧模型静默替换成另一个型号。打开设置并点击“自动获取模型”，从服务商 API 返回的最新列表选择支持图片的模型后保存；旧型号未出现在本次列表时会提示核对，原配置仍保留。空列表或网络错误不会生成本地备用型号。模型列表接口缺少能力字段时，列表只说明账号可见的型号，不保证每个型号都支持图片；也可按服务商文档手动填写。
+
+请求和解析已按现行接口适配：[OpenAI Responses](https://developers.openai.com/api/docs/guides/migrate-to-responses) 保留 JSON Schema 和 `store=false`；[Gemini](https://ai.google.dev/api/generate-content) 统一使用 `responseFormat.text`，不再按型号前缀分支；[MiMo](https://mimo.mi.com/docs/en-US/quick-start/usage-guide/text-generation/structured-output) 使用 `max_completion_tokens` 与 JSON Output。识别结果只读取最终正文，拒绝截断、被拦截或未完成的输出，不把思考文字当成营养记录。
 
 ## 应用架构
 
@@ -91,7 +97,9 @@ update/AppUpdateClient.kt      GitHub Release 检查、APK 下载、校验和、
 
 从旧 Capacitor 版本升级时，App 仅会通过迁移适配器创建隐藏 WebView，一次性读取原 `https://localhost` 本地存储，把设置、API Key 和饮食记录导入原生存储。只有数据确认保存成功后才清除旧明文密钥；失败会保留原数据并在下次启动重试。已经迁移的用户会补做明文密钥清理，旧密钥保存在独立的 Keystore 加密恢复副本中，不覆盖或重新启用当前密钥。迁移及清理完成后 WebView 不再参与界面或日常运行。
 
-当前工具链：Android 17.1（compile SDK 37.1、target SDK 37）、Android Gradle Plugin 9.3.1、Gradle 9.7.0、AGP 9 内建 Kotlin、Compose BOM 2026.08.00、Material 3、JDK 25（Java 21 字节码目标）。发布构建启用 R8 代码压缩与资源收缩。
+当前工具链：Android 17.1（compile SDK 37.1、target SDK 37）、Android Gradle Plugin 9.4.1、Gradle 9.8.1、AGP 9 内建 Kotlin、Compose 编译器 2.4.21、Compose BOM 2026.09.00、Material 3、JDK 25（Java 21 字节码目标）。依赖与插件版本统一由 `android/gradle/libs.versions.toml` 管理。发布构建启用 R8 代码压缩与资源收缩。
+
+2026-10-17 已对照 [Android 17 QPR2 / API 37.2 发布说明](https://developer.android.com/about/versions/17/qpr2/release-notes) 和 [37.2a 增量差异](https://developer.android.com/sdk/api_diff/37.2a-incr/changes/changes-summary) 检查现有代码。QPR2 当前为 Beta 7.1；后续差异已撤回早期个人上下文与 Agent 图标接口，项目未使用这些接口，也不依赖自广播后台保活或 USSD。此次保留 compile SDK 37.1，设备回归在 API 37.1 上执行，尚未验证 37.2 Beta 真机。另有现存限制：自定义 API 若指向局域网主机，需要实现 Android 17 的 [本地网络运行时授权](https://developer.android.com/privacy-and-security/local-network-permission)；当前仅支持无需这项授权的公网 HTTPS 服务。
 
 ## 开发与运行
 
@@ -115,9 +123,13 @@ cd shike/android
 | Root directory | `site` |
 | Build command | `npm run build:pages` |
 | Build output directory | `out` |
-| Node.js | `22` |
+| Node.js | `24`（至少 24.15.0） |
 
-本地预览可在 `site/` 目录运行 `npm run dev`；提交前用 `npm run build:pages` 验证 Pages 的纯静态产物。
+网站依赖已更新到 Next.js 16.4.2、React 19.3.1、Vite 8.3.4、vinext 1.2.1 稳定版和 TypeScript 6.0.3；开发与 Workers 构建使用 Vite，Pages 保持 Next.js 静态导出。
+
+本地预览可在 `site/` 目录运行 `npm run dev`；提交前用 `npm run lint`、`npm run build:pages` 和 `npm run build` 验证代码、Pages 静态产物和 Vite/Workers 构建。
+
+依赖兼容性：ESLint 暂保留 9 系维护版，以满足现有插件的 peer 要求；TypeScript 使用 6.0.3，保留构建工具所需的程序 API。2026-10-17 审计中，网站生产依赖为 0 漏洞；开发工具链仍有 8 条 high 报告，均来自同一个尚无补丁的 [braces 递归拒绝服务公告](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)。这些依赖不参与 Android APK 构建。
 
 如需在本地验证签名构建，将 `android/release-signing.properties.example` 复制为 `android/release-signing.properties`，按示例路径准备签名证书和密码文件，再运行 `./gradlew assembleRelease`。签名材料已被 Git 忽略；正式发行由 GitHub CD 使用仓库 Secrets 完成，升级同一个 App 必须持续使用同一证书。
 
@@ -125,7 +137,7 @@ cd shike/android
 
 App 启动后至多每 24 小时请求一次本仓库的 GitHub 最新稳定 Release；检查失败时不会打扰正常使用。设置页的“检查更新”不受节流限制。发现更高版本后，Material 3 对话框会显示 Release Notes，在 App 私有目录下载匹配版本的已签名 APK 和校验文件，SHA-256 一致后才会唤起 Android 系统安装器。App 不内置 GitHub Token，也不会绕过系统确认静默安装 APK；Release 页面保留为下载失败时的备用入口。
 
-Android 和网站使用独立、按路径触发的 CI：修改 `android/` 时，`.github/workflows/ci.yml` 会运行单元测试、Compose 测试源码编译、Lint、Debug 构建和 R8 Release 构建；修改 `site/` 时，`.github/workflows/site-ci.yml` 会运行 ESLint 和 Cloudflare Pages 静态生产构建。两者都支持在 Actions 页面手动触发，同时修改两个目录时会并行运行。
+Android 和网站使用独立、按路径触发的 CI：修改 `android/` 时，`.github/workflows/ci.yml` 会运行单元测试、Compose 测试源码编译、Lint、Debug 构建和 R8 Release 构建；修改 `site/` 时，`.github/workflows/site-ci.yml` 会运行 ESLint、Cloudflare Pages 静态生产构建和 Vite/Workers 构建。两者都支持在 Actions 页面手动触发，同时修改两个目录时会并行运行。
 
 `.github/workflows/release.yml` 会在推送 `vMAJOR.MINOR.PATCH` 标签时执行以下流程：
 
@@ -185,7 +197,7 @@ cd android
 ./gradlew connectedDebugAndroidTest
 ```
 
-单元测试覆盖 HTTPS 地址校验、协议映射、模型选择与旧配置迁移、营养汇总、7/30 天统计、模型列表归一化和提示词边界；Compose UI 测试覆盖首页关键层级、记录/统计切换、拍照入口、设置状态与 Material 交互。GitHub Actions 使用不依赖设备的原生验证链路。
+单元测试覆盖 HTTPS 地址校验、协议映射、模型 ID 保留与旧配置迁移、营养汇总、7/30 天统计、API 模型发现与分页、请求格式、最终响应解析和提示词边界；Compose UI 测试覆盖首页关键层级、记录/统计切换、拍照入口、设置状态与 Material 交互。GitHub Actions 使用不依赖设备的原生验证链路。
 
 迁移依据 [Compose 依赖与编译器配置](https://developer.android.com/develop/ui/compose/setup-compose-dependencies-and-compiler)、[Material 3 Compose](https://developer.android.com/develop/ui/compose/designsystems/material3)、[Android Photo Picker](https://developer.android.com/training/data-storage/shared/photopicker)、[预测性返回](https://developer.android.com/guide/navigation/custom-back/predictive-back-gesture) 和 [Android 网络安全配置](https://developer.android.com/privacy-and-security/security-config)。
 

@@ -8,6 +8,24 @@ import com.gee.eatapp.data.MAX_MEAL_CALORIES
 import com.gee.eatapp.data.MAX_NUTRITION_GRAMS
 
 class FoodAnalysisResponseTest {
+    @Test fun mimoUsesItsCompletionBudgetAndJsonModeWithoutChangingTheModel() {
+        val body = configureMimoVisionRequest(JSONObject().put("model", "api-returned-model"))
+        assertEquals("api-returned-model", body.getString("model"))
+        assertEquals("disabled", body.getJSONObject("thinking").getString("type"))
+        assertEquals(8192, body.getInt("max_completion_tokens"))
+        assertFalse(body.has("max_tokens"))
+        assertEquals("json_object", body.getJSONObject("response_format").getString("type"))
+    }
+
+    @Test fun geminiUsesTheCurrentStructuredOutputContractWithoutModelNameBranches() {
+        val config = geminiGenerationConfig()
+        val text = config.getJSONObject("responseFormat").getJSONObject("text")
+        assertEquals("application/json", text.getString("mimeType"))
+        assertEquals(30, text.getJSONObject("schema").getJSONObject("properties").getJSONObject("foods").getInt("maxItems"))
+        assertEquals(8192, config.getInt("maxOutputTokens"))
+        assertFalse(config.has("responseJsonSchema"))
+    }
+
     @Test fun deepSeekExplicitlyDisablesThinkingAndLeavesEnoughAnswerBudget() {
         val body = configureDeepSeekVisionRequest(JSONObject().put("model", "deepseek-flash"))
         assertEquals("disabled", body.getJSONObject("thinking").getString("type"))
@@ -41,6 +59,14 @@ class FoodAnalysisResponseTest {
             extractChatCompletionText(response(JSONObject().put("content", "{\"foods\": ["), "length"))
         }
         assertTrue(error.message.orEmpty().contains("长度限制"))
+    }
+
+    @Test fun interruptedCompletionsCannotSaveEvenValidLookingJson() {
+        listOf("aborted", "insufficient_system_resource", "tool_calls", "future_error").forEach { reason ->
+            assertThrows(IllegalStateException::class.java) {
+                extractChatCompletionText(response(JSONObject().put("content", "{\"is_food\":true}"), reason))
+            }
+        }
     }
 
     @Test fun reasoningOnlyResponseDoesNotBecomeFoodData() {

@@ -1,12 +1,12 @@
 # Website dependency audit — 2026-10-29
 
-Scope: `site/` only. No deployment was performed. Package versions were checked against the npm registry's stable `latest` tags and the official documentation below on 2026-10-29; the lockfile was regenerated and reproduced with `npm ci`.
+Scope: `site/` only. The initial dependency review did not perform a deployment; the Pages compatibility follow-up below addresses the subsequent preview build failure. Package versions were checked against the npm registry's stable `latest` tags and the official documentation below on 2026-10-29; the lockfile was regenerated and reproduced with `npm ci`.
 
 ## Versions and compatibility
 
 | Component | Before | Selected |
 | --- | --- | --- |
-| Node.js | 24.x, minimum 24.15.0 | 26.13.0 LTS, pinned in `.nvmrc` |
+| Node.js | 24.x, minimum 24.15.0 | Pages: 24.22.1 LTS in `.nvmrc`; CI: 24.22.1 and 26.13.0 LTS |
 | Next.js / eslint-config-next | 16.4.2 | 16.4.3 |
 | Vite | 8.3.4 | 8.3.5 |
 | vinext | 1.2.1 | 1.4.0 |
@@ -67,3 +67,11 @@ The Vite static pre-renderer requires a loopback listening socket. It was blocke
 - [Cloudflare Workers SDK releases, including the registry migration](https://github.com/cloudflare/workers-sdk/releases)
 - [Cloudflare Vite plugin](https://developers.cloudflare.com/workers/vite-plugin/)
 - [Cloudflare source-map default change](https://developers.cloudflare.com/changelog/post/2026-10-20-source-maps-on-by-default/)
+
+## Pages compatibility follow-up
+
+The preview for commit `9945f9d9fceccfb6a017948354afe050e3f56c2b` failed before dependency installation: Cloudflare Pages' node-build reported `definition not found: 26.13.0`, including after its plugin retry. GitHub Actions and the earlier local Node 26 builds passed; this was a host runtime-selection failure, not an application build failure.
+
+Use [Node 24.22.1 LTS](https://nodejs.org/en/blog/release/v24.22.1/), the October 21 security release available in the [node-build definitions](https://github.com/nodenv/node-build/tree/master/share/node-build). Node 26.13.0 and the newer 24.22.2 were not yet present there at rollout time. The documented [Pages `.nvmrc` override](https://developers.cloudflare.com/pages/configuration/build-image/) selects 24.22.1 without changing Cloudflare environment variables, credentials, or build targets. Package engines and the lockfile's root metadata allow Node 24.22.1 or Node 26.13.0 and newer; resolved dependencies and integrity values are unchanged.
+
+Site CI runs frozen installation, lint, Vite build, regenerated Next route type checks and static export on both Node 24.22.1 and 26.13.0. The latest exact-head CI and real Pages preview must pass before merging. Node 24.22.1 is an explicit deployment compatibility pin, not a claim to be the newest Node release.

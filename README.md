@@ -123,7 +123,9 @@ cd shike/android
 | Root directory | `site` |
 | Build command | `npm run build:pages` |
 | Build output directory | `out` |
-| Node.js | `26.13.0` LTS |
+| Node.js | `24.22.1` LTS（Pages 兼容构建；CI 同时验证 `26.13.0` LTS） |
+
+Pages 当前的 node-build 尚无 Node 26.13.0 安装定义，因此 `.nvmrc` 使用已包含 2026-10-21 安全修复的 Node 24.22.1 LTS；不降级应用依赖、不改变部署目标。Site CI 同时测试这两个运行时，实际 Pages 预览构建通过后才合并发布。
 
 网站依赖已更新到 Next.js 16.4.3、React 19.3.1、Vite 8.3.5、vinext 1.4.0 稳定版和 TypeScript 7.0.2 CLI；开发与 Workers 构建使用 Vite，Pages 保持 Next.js 静态导出。
 

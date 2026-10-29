@@ -97,7 +97,7 @@ update/AppUpdateClient.kt      GitHub Release 检查、APK 下载、校验和、
 
 从旧 Capacitor 版本升级时，App 仅会通过迁移适配器创建隐藏 WebView，一次性读取原 `https://localhost` 本地存储，把设置、API Key 和饮食记录导入原生存储。只有数据确认保存成功后才清除旧明文密钥；失败会保留原数据并在下次启动重试。已经迁移的用户会补做明文密钥清理，旧密钥保存在独立的 Keystore 加密恢复副本中，不覆盖或重新启用当前密钥。迁移及清理完成后 WebView 不再参与界面或日常运行。
 
-当前工具链：Android 17.1（compile SDK 37.1、target SDK 37）、Android Gradle Plugin 9.4.1、Gradle 9.8.1、AGP 9 内建 Kotlin、Compose 编译器 2.4.21、Compose BOM 2026.09.00、Material 3、JDK 25（Java 21 字节码目标）。依赖与插件版本统一由 `android/gradle/libs.versions.toml` 管理。发布构建启用 R8 代码压缩与资源收缩。
+当前工具链：Android 17.1（compile SDK 37.1、target SDK 37）、Android Gradle Plugin 9.5.0、Gradle 9.8.2、AGP 9 内建 Kotlin、Compose 编译器 2.4.21、Compose BOM 2026.09.00、Material 3、JDK 25（Java 21 字节码目标）。依赖与插件版本统一由 `android/gradle/libs.versions.toml` 管理。发布构建启用 R8 代码压缩与资源收缩。
 
 2026-10-17 已对照 [Android 17 QPR2 / API 37.2 发布说明](https://developer.android.com/about/versions/17/qpr2/release-notes) 和 [37.2a 增量差异](https://developer.android.com/sdk/api_diff/37.2a-incr/changes/changes-summary) 检查现有代码。QPR2 当前为 Beta 7.1；后续差异已撤回早期个人上下文与 Agent 图标接口，项目未使用这些接口，也不依赖自广播后台保活或 USSD。此次保留 compile SDK 37.1，设备回归在 API 37.1 上执行，尚未验证 37.2 Beta 真机。另有现存限制：自定义 API 若指向局域网主机，需要实现 Android 17 的 [本地网络运行时授权](https://developer.android.com/privacy-and-security/local-network-permission)；当前仅支持无需这项授权的公网 HTTPS 服务。
 
@@ -123,13 +123,13 @@ cd shike/android
 | Root directory | `site` |
 | Build command | `npm run build:pages` |
 | Build output directory | `out` |
-| Node.js | `24`（至少 24.15.0） |
+| Node.js | `26.13.0` LTS |
 
-网站依赖已更新到 Next.js 16.4.2、React 19.3.1、Vite 8.3.4、vinext 1.2.1 稳定版和 TypeScript 6.0.3；开发与 Workers 构建使用 Vite，Pages 保持 Next.js 静态导出。
+网站依赖已更新到 Next.js 16.4.3、React 19.3.1、Vite 8.3.5、vinext 1.4.0 稳定版和 TypeScript 7.0.2 CLI；开发与 Workers 构建使用 Vite，Pages 保持 Next.js 静态导出。
 
-本地预览可在 `site/` 目录运行 `npm run dev`；提交前用 `npm run lint`、`npm run build:pages` 和 `npm run build` 验证代码、Pages 静态产物和 Vite/Workers 构建。
+本地预览可在 `site/` 目录运行 `npm run dev`；提交前用 `npm run lint`、`npm run build:pages`、`npm run build` 和 `npm run typecheck` 验证代码、Pages 静态产物、Vite/Workers 构建及重新生成的路由类型。
 
-依赖兼容性：ESLint 暂保留 9 系维护版，以满足现有插件的 peer 要求；TypeScript 使用 6.0.3，保留构建工具所需的程序 API。2026-10-17 审计中，网站生产依赖为 0 漏洞；开发工具链仍有 8 条 high 报告，均来自同一个尚无补丁的 [braces 递归拒绝服务公告](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)。这些依赖不参与 Android APK 构建。
+依赖兼容性：ESLint 保留最新兼容的 9.39.5，以满足 React/a11y 插件尚未支持 ESLint 10 的 peer 要求；ESLint 9 已结束官方维护，待插件兼容后应迁移到 10。TypeScript 7 CLI 与官方 TS6 兼容 API 包并行安装，使构建和 ESLint 均能运行。2026-10-29 全量及生产 npm 审计均为 0 漏洞；此前 braces 公告已撤回，Zod 传递依赖已升级到修复版本。完整版本、安全公告及迁移依据见[网站依赖审计](docs/site-dependency-audit-2026-10-29.md)。
 
 如需在本地验证签名构建，将 `android/release-signing.properties.example` 复制为 `android/release-signing.properties`，按示例路径准备签名证书和密码文件，再运行 `./gradlew assembleRelease`。签名材料已被 Git 忽略；正式发行由 GitHub CD 使用仓库 Secrets 完成，升级同一个 App 必须持续使用同一证书。
 
@@ -197,7 +197,9 @@ cd android
 ./gradlew connectedDebugAndroidTest
 ```
 
-单元测试覆盖 HTTPS 地址校验、协议映射、模型 ID 保留与旧配置迁移、营养汇总、7/30 天统计、API 模型发现与分页、请求格式、最终响应解析和提示词边界；Compose UI 测试覆盖首页关键层级、记录/统计切换、拍照入口、设置状态与 Material 交互。GitHub Actions 使用不依赖设备的原生验证链路。
+删除与撤销的写盘操作在 IO 调度器执行；保存失败会保留记录、照片及撤销机会并显示重试提示。第二次删除只有在保存成功后才会清理上一次删除的照片。Android 依赖版本及官方迁移、安全公告依据见 [2026-10-29 审计记录](docs/android-dependency-audit-2026-10-29.md)。
+
+单元测试（含 Robolectric 4.17 / API 37 的删除及撤销持久化失败回归）覆盖 HTTPS 地址校验、协议映射、模型 ID 保留与旧配置迁移、营养汇总、7/30 天统计、API 模型发现与分页、请求格式、最终响应解析和提示词边界；Compose UI 测试覆盖首页关键层级、记录/统计切换、拍照入口、设置状态与 Material 交互。GitHub Actions 使用不依赖设备的原生验证链路。
 
 迁移依据 [Compose 依赖与编译器配置](https://developer.android.com/develop/ui/compose/setup-compose-dependencies-and-compiler)、[Material 3 Compose](https://developer.android.com/develop/ui/compose/designsystems/material3)、[Android Photo Picker](https://developer.android.com/training/data-storage/shared/photopicker)、[预测性返回](https://developer.android.com/guide/navigation/custom-back/predictive-back-gesture) 和 [Android 网络安全配置](https://developer.android.com/privacy-and-security/security-config)。
 

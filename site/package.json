@@ -3,41 +3,43 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=24.15.0"
+    "node": ">=26.13.0"
   },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
     "build:pages": "next build",
     "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "next": "16.4.2",
+    "next": "16.4.3",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.64.0",
-    "@cloudflare/workers-types": "5.20261016.1",
+    "@cloudflare/vite-plugin": "1.66.0",
+    "@cloudflare/workers-types": "5.20261029.1",
     "@openai/sites-vite-plugin": "0.2.0",
-    "@types/node": "24.19.2",
+    "@types/node": "26.6.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@typescript/native": "npm:typescript@7.0.2",
     "@vitejs/plugin-react": "6.1.2",
     "@vitejs/plugin-rsc": "0.5.38",
     "eslint": "9.39.5",
-    "eslint-config-next": "16.4.2",
+    "eslint-config-next": "16.4.3",
     "react-server-dom-webpack": "19.3.1",
-    "typescript": "6.0.3",
-    "vinext": "1.2.1",
-    "vite": "8.3.4",
-    "wrangler": "4.151.1"
+    "typescript": "npm:@typescript/typescript6@6.0.2",
+    "vinext": "1.4.0",
+    "vite": "8.3.5",
+    "wrangler": "4.155.0"
   },
   "overrides": {
     "brace-expansion@^1.0.0": "1.1.21",
     "brace-expansion@^5.0.0": "5.0.12",
-    "fast-uri@^3.0.0": "3.1.8",
+    "fast-uri@^3.0.0": "3.1.9",
     "js-yaml@^4.0.0": "4.3.2",
     "undici@^7.0.0": "7.30.1",
     "fflate@^0.7.0": "0.7.5"

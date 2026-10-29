@@ -23,6 +23,10 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['24.22.1', '26.13.0']
     defaults:
       run:
         working-directory: site
@@ -33,18 +37,26 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version-file: site/.nvmrc
+          node-version: ${{ matrix.node }}
           cache: npm
           cache-dependency-path: site/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
+      - name: Check runtime and locked metadata
+        run: |
+          node --version
+          git diff --exit-code -- package.json package-lock.json
+
       - name: Lint
         run: npm run lint
 
       - name: Build Vite site
         run: npm run build
+
+      - name: Typecheck regenerated Next routes
+        run: npm run typecheck
 
       - name: Build static site
         run: npm run build:pages

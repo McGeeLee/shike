@@ -189,7 +189,8 @@ fun ShikeApp(viewModel: ShikeViewModel) {
             viewModel.consumeImageSourceRequest(state.imageSourceRequestId)
         }
     }
-    LaunchedEffect(state.deletedMeal?.eventId) {
+    LaunchedEffect(state.deletedMeal?.eventId, state.mealStorageError, state.isUpdatingMeals) {
+        if (state.mealStorageError != null || state.isUpdatingMeals) return@LaunchedEffect
         val deleted = state.deletedMeal ?: return@LaunchedEffect
         val result = snackbarHostState.showSnackbar(
             message = "已删除“${deleted.entry.name.ifBlank { "这条记录" }}”",
@@ -198,6 +199,25 @@ fun ShikeApp(viewModel: ShikeViewModel) {
         )
         if (result == SnackbarResult.ActionPerformed) viewModel.undoDelete(deleted.eventId)
         else viewModel.consumeDelete(deleted.eventId)
+    }
+
+    state.mealStorageError?.let { error ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissMealStorageError,
+            title = { Text(if (error.undoEventId == null) "删除失败" else "撤销失败") },
+            text = { Text(error.message) },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (error.undoEventId != null) viewModel.undoDelete(error.undoEventId)
+                    else viewModel.dismissMealStorageError()
+                }) { Text(if (error.undoEventId == null) "知道了" else "重试撤销") }
+            },
+            dismissButton = {
+                if (error.undoEventId != null) {
+                    TextButton(onClick = viewModel::dismissMealStorageError) { Text("稍后重试") }
+                }
+            },
+        )
     }
 
     ShikeHomeScreen(

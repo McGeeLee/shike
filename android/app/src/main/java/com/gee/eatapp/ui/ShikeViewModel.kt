@@ -29,6 +29,7 @@ import com.gee.eatapp.update.AppUpdateClient
 import com.gee.eatapp.update.UpdateCheckStore
 import com.gee.eatapp.update.isNewerVersion
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -68,6 +69,8 @@ sealed interface MealPanel {
     data class Error(val message: String, val image: PreparedImage? = null, val note: String = "") : MealPanel
 }
 
+data class MealStorageError(val message: String, val undoEventId: Long? = null)
+
 data class ShikeUiState(
     val selectedDate: LocalDate = LocalDate.now(),
     val entries: List<MealEntry> = emptyList(),
@@ -78,6 +81,8 @@ data class ShikeUiState(
     val mealPanel: MealPanel = MealPanel.Hidden,
     val imageSourceRequestId: Long = 0,
     val deletedMeal: DeletedMeal? = null,
+    val mealStorageError: MealStorageError? = null,
+    val isUpdatingMeals: Boolean = false,
     val availableUpdate: AppRelease? = null,
     val isCheckingForUpdate: Boolean = false,
     val isDownloadingUpdate: Boolean = false,
@@ -93,8 +98,9 @@ class ShikeViewModel @JvmOverloads constructor(
     private val releaseDownloader: suspend (Application, AppRelease) -> File = { app, release ->
         AppUpdateClient().downloadRelease(app, release)
     },
+    private val repository: ShikeRepository = ShikeRepository(application),
+    private val mealIoDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : AndroidViewModel(application) {
-    private val repository = ShikeRepository(application)
     private val analysisClient = FoodAnalysisClient()
     private val updateClient = AppUpdateClient()
     private val updateCheckStore = UpdateCheckStore(application)
@@ -199,49 +205,61 @@ class ShikeViewModel @JvmOverloads constructor(
     }
 
     fun saveMeal() {
+        if (uiState.isUpdatingMeals) return
         val panel = uiState.mealPanel as? MealPanel.Result ?: return
         val date = uiState.selectedDate
         val settings = uiState.settings
-        uiState = uiState.copy(mealPanel = MealPanel.Saving)
+        uiState = uiState.copy(mealPanel = MealPanel.Saving, isUpdatingMeals = true)
         viewModelScope.launch {
-            val result = panel.result
-            val id = UUID.randomUUID().toString()
-            runCatching {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    val archive = com.gee.eatapp.image.MealPhotoArchive(getApplication<Application>().filesDir)
-                    val photoFile = archive.save(id, android.util.Base64.decode(panel.image.analysisBase64, android.util.Base64.NO_WRAP))
-                    val entry = MealEntry(
-                        id = id,
-                        name = result.foods.joinToString("、") { it.name },
-                        calories = result.totalCalories,
-                        proteinGrams = result.foods.sumOf { it.proteinGrams },
-                        carbsGrams = result.foods.sumOf { it.carbsGrams },
-                        fatGrams = result.foods.sumOf { it.fatGrams },
-                        time = LocalTime.now().format(TIME_FORMAT),
-                        note = panel.note,
-                        thumbnailBase64 = panel.image.thumbnailBase64,
-                        photoFile = photoFile,
-                        analysisNotes = result.notes,
-                        modelLabel = "${ProviderCatalog.find(settings.providerId)?.name} · ${settings.effectiveModel()}",
-                    )
-                    val entries = repository.entries(date) + entry
-                    try {
-                        repository.saveEntries(date, entries)
-                    } catch (error: Exception) {
-                        archive.delete(photoFile)
-                        throw error
+            try {
+                val result = panel.result
+                val id = UUID.randomUUID().toString()
+                runCatching {
+                    withContext(mealIoDispatcher) {
+                        val archive = com.gee.eatapp.image.MealPhotoArchive(getApplication<Application>().filesDir)
+                        val photoFile = archive.save(id, android.util.Base64.decode(panel.image.analysisBase64, android.util.Base64.NO_WRAP))
+                        val entry = MealEntry(
+                            id = id,
+                            name = result.foods.joinToString("、") { it.name },
+                            calories = result.totalCalories,
+                            proteinGrams = result.foods.sumOf { it.proteinGrams },
+                            carbsGrams = result.foods.sumOf { it.carbsGrams },
+                            fatGrams = result.foods.sumOf { it.fatGrams },
+                            time = LocalTime.now().format(TIME_FORMAT),
+                            note = panel.note,
+                            thumbnailBase64 = panel.image.thumbnailBase64,
+                            photoFile = photoFile,
+                            analysisNotes = result.notes,
+                            modelLabel = "${ProviderCatalog.find(settings.providerId)?.name} · ${settings.effectiveModel()}",
+                        )
+                        val entries = repository.entries(date) + entry
+                        try {
+                            repository.saveEntries(date, entries)
+                        } catch (error: Exception) {
+                            archive.delete(photoFile)
+                            throw error
+                        }
+                        entries
                     }
-                    entries
+                }.onSuccess { entries ->
+                    uiState = uiState.copy(
+                        entries = if (uiState.selectedDate == date) entries else uiState.entries,
+                        nutritionHistory = updatedNutritionHistory(date, entries),
+                        mealPanel = MealPanel.Hidden,
+                        isUpdatingMeals = false,
+                    )
+                }.onFailure { error ->
+                    if (error is CancellationException) throw error
+                    uiState = uiState.copy(
+                        mealPanel = panel.copy(saveError = error.message ?: "保存失败，请重试"),
+                        isUpdatingMeals = false,
+                    )
                 }
-            }.onSuccess { entries ->
+            } finally {
                 uiState = uiState.copy(
-                    entries = if (uiState.selectedDate == date) entries else uiState.entries,
-                    nutritionHistory = updatedNutritionHistory(date, entries),
-                    mealPanel = MealPanel.Hidden,
+                    isUpdatingMeals = false,
+                    mealPanel = if (uiState.mealPanel == MealPanel.Saving) panel else uiState.mealPanel,
                 )
-            }.onFailure { error ->
-                if (error is CancellationException) throw error
-                uiState = uiState.copy(mealPanel = panel.copy(saveError = error.message ?: "保存失败，请重试"))
             }
         }
     }
@@ -254,34 +272,82 @@ class ShikeViewModel @JvmOverloads constructor(
     }
 
     fun deleteMeal(index: Int) {
-        if (index !in uiState.entries.indices) return
-        uiState.deletedMeal?.let { consumeDelete(it.eventId) }
-        val entries = uiState.entries.toMutableList()
+        if (uiState.isUpdatingMeals || index !in uiState.entries.indices) return
+        val date = uiState.selectedDate
+        val previousEntries = uiState.entries
+        val entries = previousEntries.toMutableList()
         val entry = entries.removeAt(index)
-        repository.saveEntries(uiState.selectedDate, entries)
-        uiState = uiState.copy(
-            entries = entries,
-            nutritionHistory = updatedNutritionHistory(uiState.selectedDate, entries),
-            deletedMeal = DeletedMeal(++eventCounter, uiState.selectedDate, entry, index),
-        )
+        uiState = uiState.copy(isUpdatingMeals = true, mealStorageError = null)
+        viewModelScope.launch {
+            try {
+                withContext(mealIoDispatcher) { repository.saveEntries(date, entries) }
+                // Retire the previous undo only after the new deletion is durable.
+                uiState.deletedMeal?.let { finishDelete(it.eventId) }
+                uiState = uiState.copy(
+                    entries = if (date == uiState.selectedDate) entries else uiState.entries,
+                    nutritionHistory = updatedNutritionHistory(date, entries),
+                    deletedMeal = DeletedMeal(++eventCounter, date, entry, index),
+                )
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                uiState = uiState.copy(
+                    entries = if (date == uiState.selectedDate) previousEntries else uiState.entries,
+                    mealStorageError = MealStorageError(
+                        "删除失败，请检查设备存储空间后重试。记录和照片已保留。",
+                    ),
+                )
+            } finally {
+                uiState = uiState.copy(isUpdatingMeals = false)
+            }
+        }
     }
 
     fun undoDelete(eventId: Long) {
+        if (uiState.isUpdatingMeals) return
         val deleted = uiState.deletedMeal?.takeIf { it.eventId == eventId } ?: return
-        val entries = repository.entries(deleted.date).toMutableList()
-        entries.add(deleted.index.coerceIn(0, entries.size), deleted.entry)
-        repository.saveEntries(deleted.date, entries)
-        uiState = uiState.copy(
-            entries = if (deleted.date == uiState.selectedDate) entries else uiState.entries,
-            nutritionHistory = updatedNutritionHistory(deleted.date, entries),
-            deletedMeal = null,
-        )
+        uiState = uiState.copy(isUpdatingMeals = true, mealStorageError = null)
+        viewModelScope.launch {
+            var previousEntries: List<MealEntry>? = null
+            try {
+                val entries = withContext(mealIoDispatcher) {
+                    repository.entries(deleted.date).also { previousEntries = it }.toMutableList().apply {
+                        add(deleted.index.coerceIn(0, size), deleted.entry)
+                        repository.saveEntries(deleted.date, this)
+                    }
+                }
+                uiState = uiState.copy(
+                    entries = if (deleted.date == uiState.selectedDate) entries else uiState.entries,
+                    nutritionHistory = updatedNutritionHistory(deleted.date, entries),
+                    deletedMeal = null,
+                )
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                uiState = uiState.copy(
+                    entries = if (deleted.date == uiState.selectedDate) previousEntries ?: uiState.entries else uiState.entries,
+                    mealStorageError = MealStorageError(
+                        "撤销未能保存，请检查设备存储空间后重试。照片和撤销机会已保留。",
+                        undoEventId = eventId,
+                    ),
+                )
+            } finally {
+                uiState = uiState.copy(isUpdatingMeals = false)
+            }
+        }
+    }
+
+    fun dismissMealStorageError() {
+        uiState = uiState.copy(mealStorageError = null)
     }
 
     fun consumeDelete(eventId: Long) {
+        if (uiState.isUpdatingMeals || uiState.mealStorageError != null) return
+        finishDelete(eventId)
+    }
+
+    private fun finishDelete(eventId: Long) {
         val deleted = uiState.deletedMeal?.takeIf { it.eventId == eventId } ?: return
         uiState = uiState.copy(deletedMeal = null)
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        viewModelScope.launch(mealIoDispatcher) {
             com.gee.eatapp.image.MealPhotoArchive(getApplication<Application>().filesDir).delete(deleted.entry.photoFile)
         }
     }
@@ -594,6 +660,9 @@ class ShikeViewModel @JvmOverloads constructor(
         uiState = loadState(uiState.selectedDate).copy(
             settingsDraft = uiState.settingsDraft,
             mealPanel = uiState.mealPanel,
+            deletedMeal = uiState.deletedMeal,
+            mealStorageError = uiState.mealStorageError,
+            isUpdatingMeals = uiState.isUpdatingMeals,
             availableUpdate = uiState.availableUpdate,
             isCheckingForUpdate = uiState.isCheckingForUpdate,
             isDownloadingUpdate = uiState.isDownloadingUpdate,

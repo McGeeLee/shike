@@ -100,8 +100,8 @@ class ShikeViewModel @JvmOverloads constructor(
     },
     private val repository: ShikeRepository = ShikeRepository(application),
     private val mealIoDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val mealAnalysis: suspend (AppSettings, String, String, String) -> AnalysisResult = FoodAnalysisClient()::analyze,
 ) : AndroidViewModel(application) {
-    private val analysisClient = FoodAnalysisClient()
     private val updateClient = AppUpdateClient()
     private val updateCheckStore = UpdateCheckStore(application)
     private val imageProcessor = ImageProcessor(application.contentResolver)
@@ -171,12 +171,11 @@ class ShikeViewModel @JvmOverloads constructor(
     fun analyzeMeal() {
         val preview = uiState.mealPanel as? MealPanel.Preview ?: return
         analysisJob?.cancel()
-        val settings = uiState.settings
-        val apiKey = repository.apiKey(settings.providerId)
+        val configuration = repository.apiConfiguration()
         uiState = uiState.copy(mealPanel = MealPanel.Analyzing(preview.image, preview.note))
         analysisJob = viewModelScope.launch {
             runCatching {
-                analysisClient.analyze(settings, apiKey, preview.image.analysisBase64, preview.note)
+                mealAnalysis(configuration.settings, configuration.apiKey, preview.image.analysisBase64, preview.note)
             }.onSuccess { result ->
                 uiState = if (result.isFood && result.foods.isNotEmpty()) {
                     uiState.copy(mealPanel = MealPanel.Result(preview.image, preview.note, result))
@@ -354,14 +353,15 @@ class ShikeViewModel @JvmOverloads constructor(
 
     fun openSettings() {
         invalidateModelDiscovery()
-        val settings = repository.settings()
+        val configuration = repository.apiConfiguration()
+        val settings = configuration.settings
         val selectedModel = settings.effectiveModel()
         uiState = uiState.copy(
             settingsDraft = SettingsDraft(
                 providerId = settings.providerId,
                 selectedModel = selectedModel,
                 customBaseUrl = settings.customBaseUrl,
-                apiKey = repository.apiKey(settings.providerId),
+                apiKey = configuration.apiKey,
                 goalInput = repository.goal().toString(),
                 dynamicColorEnabled = settings.dynamicColorEnabled,
                 selections = mapOf(settings.providerId to selectedModel),
@@ -387,7 +387,7 @@ class ShikeViewModel @JvmOverloads constructor(
             settingsDraft = draft.copy(
                 providerId = providerId,
                 selectedModel = selected,
-                apiKey = repository.apiKey(providerId),
+                apiKey = repository.apiKey(providerId, draft.customBaseUrl),
                 selections = selections + (providerId to selected),
                 statusMessage = "",
                 statusKind = ConnectionStatusKind.IDLE,

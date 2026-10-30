@@ -7,6 +7,9 @@ import org.json.JSONObject
 import java.time.LocalDate
 import java.util.UUID
 
+/** A request must keep its destination and credential from the same published configuration. */
+class ApiConfiguration internal constructor(val settings: AppSettings, val apiKey: String)
+
 class ShikeRepository internal constructor(
     private val preferences: SharedPreferences,
     private val keyStore: ApiKeyStore,
@@ -16,9 +19,9 @@ class ShikeRepository internal constructor(
         SecureApiKeyStore(context),
     )
 
-    fun settings(): AppSettings {
-        val raw = preferences.getString(KEY_SETTINGS, null) ?: return AppSettings()
-        return runCatching {
+    fun settings(): AppSettings = synchronized(preferences) {
+        val raw = preferences.getString(KEY_SETTINGS, null) ?: return@synchronized AppSettings()
+        runCatching {
             val json = JSONObject(raw)
             AppSettings(
                 providerId = json.optString("provider", AppSettings().providerId).safeProviderId(),
@@ -30,21 +33,52 @@ class ShikeRepository internal constructor(
         }.getOrDefault(AppSettings())
     }
 
-    fun goal(): Int = preferences.getInt(KEY_GOAL, DEFAULT_GOAL).coerceIn(1, MAX_GOAL)
+    fun goal(): Int = synchronized(preferences) {
+        preferences.getInt(KEY_GOAL, DEFAULT_GOAL).coerceIn(1, MAX_GOAL)
+    }
 
-    fun apiKey(providerId: String): String = keyStore.get(providerId)
+    fun apiKey(providerId: String, customBaseUrl: String? = null): String = synchronized(preferences) {
+        if (providerId == "custom") {
+            // Bind the full base URL, including path and port. Drafts and inactive-provider
+            // settings can change the custom endpoint without also saving its credential.
+            val requestedEndpoint = runCatching {
+                normalizeBaseUrl(customBaseUrl ?: settings().customBaseUrl)
+            }.getOrNull() ?: return@synchronized ""
+            if (requestedEndpoint != runCatching { normalizeBaseUrl(customKeyEndpoint()) }.getOrNull()) {
+                return@synchronized ""
+            }
+        }
+        val version = preferences.getString(apiKeyVersionKey(providerId), null)
+        if (version == null) keyStore.get(providerId) else keyStore.getVersion(version)
+    }
 
-    fun saveSettings(settings: AppSettings, goal: Int, apiKey: String) {
+    fun apiConfiguration(): ApiConfiguration = synchronized(preferences) {
+        val settings = settings()
+        ApiConfiguration(settings, apiKey(settings.providerId))
+    }
+
+    fun saveSettings(settings: AppSettings, goal: Int, apiKey: String) = synchronized(preferences) {
+        val customEndpoint = if (settings.providerId == "custom") {
+            settings.customBaseUrl.take(2048)
+        } else {
+            customKeyEndpoint()
+        }
         val json = JSONObject()
             .put("provider", settings.providerId.safeProviderId())
             .put("model", settings.model.take(200))
             .put("customBaseUrl", settings.customBaseUrl.take(2048))
             .put("customModel", settings.customModel.take(200))
             .put("dynamicColorEnabled", settings.dynamicColorEnabled)
-        keyStore.put(settings.providerId, apiKey)
+        // Publish only after the immutable encrypted credential is durable. A failed settings
+        // commit (or a process death between these writes) leaves an unreferenced version,
+        // never a new key under the old endpoint. Keep versions even if rollback also fails:
+        // the disk may contain either complete settings/reference pair after a restart.
+        val version = keyStore.stage(apiKey)
         preferences.commitOrThrow("设置保存失败，请检查设备存储空间") {
             putString(KEY_SETTINGS, json.toString())
             putInt(KEY_GOAL, goal.coerceIn(1, MAX_GOAL))
+            putString(apiKeyVersionKey(settings.providerId), version)
+            putString(KEY_CUSTOM_KEY_ENDPOINT, customEndpoint)
         }
     }
 
@@ -131,11 +165,28 @@ class ShikeRepository internal constructor(
                 dynamicColorEnabled = false,
             )
         }
+        val importedVersions = mutableMapOf<String, String>()
         ProviderCatalog.all.forEach { provider ->
-            legacyKeys.optString(provider.id).takeIf(String::isNotBlank)?.let { keyStore.put(provider.id, it) }
+            // An export without a custom endpoint cannot bind its key to the current native
+            // endpoint. Retain that key in the encrypted recovery copy instead.
+            val hasEndpoint = provider.id != "custom" || importedSettings?.customBaseUrl?.let {
+                runCatching { normalizeBaseUrl(it) }.isSuccess
+            } == true
+            if (hasEndpoint) legacyKeys.optString(provider.id).takeIf(String::isNotBlank)?.let {
+                importedVersions[provider.id] = keyStore.stage(it)
+            }
         }
         if (legacyKeys.length() > 0) keyStore.retainLegacyKeys(legacyKeys.toString())
+        val customEndpoint = if (importedVersions.containsKey("custom")) {
+            importedSettings!!.customBaseUrl
+        } else {
+            customKeyEndpoint()
+        }
         preferences.commitOrThrow("旧数据迁移保存失败，请检查设备存储空间") {
+            putString(KEY_CUSTOM_KEY_ENDPOINT, customEndpoint)
+            importedVersions.forEach { (providerId, version) ->
+                putString(apiKeyVersionKey(providerId), version)
+            }
             importedSettings?.let { settings ->
                 putString(KEY_SETTINGS, JSONObject()
                     .put("provider", settings.providerId)
@@ -155,6 +206,12 @@ class ShikeRepository internal constructor(
     }
 
     private fun entriesKey(date: LocalDate) = "entries_$date"
+
+    private fun apiKeyVersionKey(providerId: String) = "api_key_version_${providerId.safeProviderId()}"
+
+    private fun customKeyEndpoint(): String = preferences.getString(KEY_CUSTOM_KEY_ENDPOINT, null)
+        // Old native keys predate versioning and belong to their existing saved endpoint.
+        ?: if (preferences.contains(apiKeyVersionKey("custom"))) "" else settings().customBaseUrl
 
     private fun MealEntry.toJson() = JSONObject()
         .put("id", id)
@@ -198,6 +255,7 @@ class ShikeRepository internal constructor(
         private const val MAX_THUMBNAIL_CHARS = 256_000
         private const val KEY_SETTINGS = "settings"
         private const val KEY_GOAL = "goal"
+        private const val KEY_CUSTOM_KEY_ENDPOINT = "custom_api_key_endpoint_v1"
         private const val KEY_LEGACY_MIGRATED = "legacy_webview_migrated_v1"
         private const val KEY_LEGACY_KEYS_CLEARED = "legacy_webview_keys_cleared_v1"
     }

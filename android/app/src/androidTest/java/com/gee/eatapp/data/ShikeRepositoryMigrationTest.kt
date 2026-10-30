@@ -51,7 +51,7 @@ class ShikeRepositoryMigrationTest {
         assertTrue(repository.entries(date).isEmpty())
         keyStore.failWrites = false
         assertEquals(1, repository.importLegacyData(payload()))
-        assertEquals("old-key", keyStore.get("openai"))
+        assertEquals("old-key", repository.apiKey("openai"))
         assertEquals(1, repository.entries(date).size)
         assertTrue(repository.legacyMigrationComplete())
         assertEquals(0, repository.importLegacyData(payload()))
@@ -106,6 +106,7 @@ class ShikeRepositoryMigrationTest {
 
     private class FakeKeys : ApiKeyStore {
         val active = mutableMapOf<String, String>()
+        private val versions = mutableMapOf<String, String>()
         var failWrites = false
         var failRecovery = false
         var recovery: String? = null
@@ -114,6 +115,11 @@ class ShikeRepositoryMigrationTest {
         override fun put(providerId: String, apiKey: String) {
             check(!failWrites) { "key write failed" }
             active[providerId] = apiKey
+        }
+        override fun getVersion(version: String) = versions[version].orEmpty()
+        override fun stage(apiKey: String): String {
+            check(!failWrites) { "key write failed" }
+            return UUID.randomUUID().toString().also { versions[it] = apiKey }
         }
         override fun retainLegacyKeys(keysJson: String) {
             check(!failRecovery) { "recovery write failed" }

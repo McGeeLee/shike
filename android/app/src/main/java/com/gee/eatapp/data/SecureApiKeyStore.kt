@@ -6,6 +6,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.core.content.edit
 import java.security.KeyStore
+import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -14,6 +15,8 @@ import javax.crypto.spec.GCMParameterSpec
 internal interface ApiKeyStore {
     fun get(providerId: String): String
     fun put(providerId: String, apiKey: String)
+    fun stage(apiKey: String): String
+    fun getVersion(version: String): String
     fun retainLegacyKeys(keysJson: String)
 }
 
@@ -33,6 +36,26 @@ internal class SecureApiKeyStore(context: Context) : ApiKeyStore {
             if (apiKey.isBlank()) remove(keyName(providerId))
             else putString(keyName(providerId), encrypt(apiKey.trim()))
         }
+    }
+
+    /** Persists a new immutable key; only a later settings commit makes it active. */
+    override fun stage(apiKey: String): String = synchronized(preferences) {
+        var version: String
+        do {
+            version = UUID.randomUUID().toString()
+        } while (preferences.contains(versionKeyName(version)))
+        val encrypted = encrypt(apiKey.trim())
+        preferences.commitOrThrow("API Key 保存失败，请检查设备存储空间") {
+            // An empty key is a real version, so deleting a key cannot revive a legacy key.
+            putString(versionKeyName(version), encrypted)
+        }
+        version
+    }
+
+    override fun getVersion(version: String): String {
+        val encoded = preferences.getString(versionKeyName(version), null) ?: return ""
+        // An unreadable version must never fall back to another credential.
+        return runCatching { decrypt(encoded) }.getOrDefault("")
     }
 
     /** Keeps old keys encrypted without replacing or reactivating the user's current keys. */
@@ -88,6 +111,8 @@ internal class SecureApiKeyStore(context: Context) : ApiKeyStore {
     }
 
     private fun keyName(providerId: String) = "api_key_${providerId.safeProviderId()}"
+
+    private fun versionKeyName(version: String) = "api_key_version_$version"
 
     private companion object {
         const val KEYSTORE_PROVIDER = "AndroidKeyStore"

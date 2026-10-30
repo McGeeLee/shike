@@ -51,6 +51,8 @@ class ShikeViewModelPersistenceTest {
         repository = ShikeRepository(preferences, object : ApiKeyStore {
             override fun get(providerId: String) = ""
             override fun put(providerId: String, apiKey: String) = Unit
+            override fun stage(apiKey: String) = "unused-test-version"
+            override fun getVersion(version: String) = ""
             override fun retainLegacyKeys(keysJson: String) = Unit
         })
         first = meal("first", 100)
